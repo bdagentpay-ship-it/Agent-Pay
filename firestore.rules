@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default fallback deny rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Rules for agents collection
+    match /agents/{agentId} {
+      allow read, write: if true;
+    }
+
+    // Rules for transactions collection
+    match /transactions/{transactionId} {
+      allow read, write: if true;
+    }
+
+    // Rules for balance_requests collection
+    match /balance_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    // Rules for notifications collection
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+  }
+}

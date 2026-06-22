@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Agent": {
+      "title": "Agent",
+      "description": "Registered agent details including current balances, profile information, and security limits.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "dob": { "type": "string" },
+        "password": { "type": "string" },
+        "balance": { "type": "number" },
+        "commissionBalance": { "type": "number" },
+        "todayDeposit": { "type": "number" },
+        "todayWithdraw": { "type": "number" },
+        "referralsCount": { "type": "number" },
+        "referralEarnings": { "type": "number" },
+        "referralCode": { "type": "string" },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "dailyDeposit": { "type": "number" },
+            "weeklyDeposit": { "type": "number" },
+            "monthlyDeposit": { "type": "number" },
+            "dailyWithdraw": { "type": "number" },
+            "weeklyWithdraw": { "type": "number" },
+            "monthlyWithdraw": { "type": "number" }
+          }
+        }
+      },
+      "required": ["id", "name", "phone", "balance", "commissionBalance", "referralCode"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Log of a deposit or withdrawal transaction processed by an agent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["deposit", "withdraw"] },
+        "playerId": { "type": "string" },
+        "playerName": { "type": "string" },
+        "amount": { "type": "number" },
+        "comPercent": { "type": "number" },
+        "comAmount": { "type": "number" },
+        "method": { "type": "string", "enum": ["bKash", "Nagad", "Rocket", "Upay"] },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string", "enum": ["completed", "pending", "failed"] },
+        "reference": { "type": "string" },
+        "agentId": { "type": "string" }
+      },
+      "required": ["id", "type", "playerId", "playerName", "amount", "comPercent", "comAmount", "method", "timestamp", "status"]
+    },
+    "BalanceRequest": {
+      "title": "BalanceRequest",
+      "description": "Agent balance top up request submitted to administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string", "enum": ["bKash", "Nagad", "Rocket", "Bank"] },
+        "senderNumber": { "type": "string" },
+        "txid": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "agentId": { "type": "string" },
+        "screenshotUrl": { "type": "string" }
+      },
+      "required": ["id", "amount", "method", "senderNumber", "txid", "timestamp", "status"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Alert notification displayed to the agent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["deposit", "withdraw", "balance", "commission", "general"] }
+      },
+      "required": ["id", "title", "body", "timestamp", "read", "type"]
+    }
+  },
+  "firestore": {
+    "/agents/{agentId}": {
+      "schema": "Agent",
+      "description": "Individual agent document with operational and identity attributes."
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Ledger entries of deposits and withdrawals."
+    },
+    "/balance_requests/{requestId}": {
+      "schema": "BalanceRequest",
+      "description": "Recharge request logs checked by admins."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "NotificationItem",
+      "description": "Push notification messages."
+    }
+  }
+}
