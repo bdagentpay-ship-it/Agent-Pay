@@ -32,7 +32,9 @@ import {
   Lock,
   Mail,
   Calendar,
-  Smartphone
+  Smartphone,
+  Trash2,
+  Check
 } from 'lucide-react';
 import { Transaction, BalanceRequest, CommissionWithdrawal, Agent, PlayerRequest } from '../types';
 
@@ -52,6 +54,7 @@ interface ModalProps {
   timeLeft?: number;
   onTriggerPlayerRequest?: (manualType?: 'deposit' | 'withdraw') => void;
   onUpdateProfile?: (updatedFields: Partial<Agent>) => void;
+  onDeleteTransaction?: (txId: string) => void;
 }
 
 interface ModalContainerProps {
@@ -119,7 +122,8 @@ export default function Modals({
   onResolvePlayerRequest = () => {},
   timeLeft = 60,
   onTriggerPlayerRequest = () => {},
-  onUpdateProfile = () => {}
+  onUpdateProfile = () => {},
+  onDeleteTransaction = () => {}
 }: ModalProps) {
 
   // Translate english numbers to Bengali
@@ -172,6 +176,7 @@ export default function Modals({
   const [profileEmail, setProfileEmail] = useState(agent.email || '');
   const [profileDob, setProfileDob] = useState(agent.dob || '');
   const [profilePassword, setProfilePassword] = useState(agent.password || '');
+  const [idCopied, setIdCopied] = useState(false);
 
   useEffect(() => {
     if (type === 'profile') {
@@ -418,6 +423,8 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
   };
 
   // Commission Withdrawal States
+  const [commissionStep, setCommissionStep] = useState(1);
+  const [commAmountValue, setCommAmountValue] = useState(0);
   const [commMethod, setCommMethod] = useState<'main_balance' | 'mobile_banking'>('main_balance');
   const [commMobileMethod, setCommMobileMethod] = useState<'bKash' | 'Nagad' | 'Rocket' | 'Upay'>('bKash');
   const [receiverNumber, setReceiverNumber] = useState('');
@@ -433,20 +440,40 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
     }
 
     onSubmitCommissionWithdrawal(money, commMethod, commMobileMethod, receiverNumber);
-    setSuccessMsg('কমিশন উত্তোলন সফল হয়েছে!');
+    setCommAmountValue(money);
+    
+    if (commMethod === 'mobile_banking') {
+      setSuccessMsg('কমিশন উত্তোলন রিকোয়েস্ট তৈরি করা হয়েছে!');
+    } else {
+      setSuccessMsg('কমিশন মেইন ব্যালেন্সে কনভার্ট করা হয়েছে!');
+    }
     setTimeout(() => {
-      onClose();
+      setSuccessMsg('');
+      setCommissionStep(2);
     }, 1200);
   };
 
   // History filtering states
-  const [historyType, setHistoryType] = useState<'all' | 'deposit' | 'withdraw'>('all');
+  const [historyType, setHistoryType] = useState<'all' | 'deposit' | 'withdraw' | 'balance_add' | 'commission_withdraw'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredHistory = transactions.filter(t => {
-    const matchesType = historyType === 'all' || t.type === historyType;
-    const matchesSearch = t.playerId.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          t.playerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    let matchesType = false;
+    const tType = t.type as string;
+    if (historyType === 'all') {
+      matchesType = true;
+    } else if (historyType === 'deposit') {
+      matchesType = tType === 'deposit' || tType === 'deposit_rejected' || tType === 'deposit_cancelled';
+    } else if (historyType === 'withdraw') {
+      matchesType = tType === 'withdraw' || tType === 'withdraw_rejected' || tType === 'withdraw_cancelled';
+    } else if (historyType === 'balance_add') {
+      matchesType = tType === 'balance_add' || tType === 'balance_rejected';
+    } else if (historyType === 'commission_withdraw') {
+      matchesType = tType === 'commission_withdraw';
+    }
+
+    const matchesSearch = (t.playerId || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          (t.playerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                           t.id.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesType && matchesSearch;
   });
@@ -1123,191 +1150,437 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
       {/* 4. WITHDRAW COMMISSION MODAL */}
       {type === 'withdraw_commission' && (
         <ModalContainer title="উপার্জিত কমিশন ব্যালেন্স উত্তোলন" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
-          <form onSubmit={handleCommissionWithdrawal} className="flex flex-col gap-4">
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">অবশিষ্ট কমিশন ফান্ড</span>
-                <span className="text-sm font-bold text-amber-600">৳ {formatCurrency(agent.commissionBalance)} টাকা</span>
-              </div>
-              <BadgePercent className="w-8 h-8 text-amber-600 bg-amber-50 p-1.5 rounded-xl border border-amber-200 animate-pulse" />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">উত্তোলন গেটওয়ে</label>
-              <div className="grid grid-cols-2 gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => setCommMethod('main_balance')}
-                  className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
-                    commMethod === 'main_balance' 
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-800' 
-                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-55'
-                  }`}
-                >
-                  <span className="text-xs font-bold">মেইন ওয়ালেট</span>
-                  <span className="text-[9px] mt-0.5 leading-tight text-slate-500">instant-ফ্রি ব্যালেন্স কনভার্ট</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setCommMethod('mobile_banking')}
-                  className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
-                    commMethod === 'mobile_banking' 
-                      ? 'bg-blue-50 border-blue-400 text-blue-800' 
-                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-55'
-                  }`}
-                >
-                  <span className="text-xs font-bold">মোবাইল ব্যাংকিং</span>
-                  <span className="text-[9px] mt-0.5 leading-tight text-slate-505">bKash/Nagad ওয়ালেটে ক্যাশআউট</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">উত্তোলন টাকার পরিমাণ</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">৳</span>
-                <input
-                  type="number"
-                  placeholder="যেমনঃ ১,৫০০"
-                  value={amountInput}
-                  onChange={(e) => { setErrorMsg(''); setAmountInput(e.target.value); }}
-                  className="w-full pl-8 pr-4 py-2 text-sm rounded-lg bg-slate-55 border border-slate-200 focus:border-blue-500 text-slate-850 outline-none transition font-semibold"
-                  max={agent.commissionBalance}
-                  required
-                />
-              </div>
-            </div>
-
-            {commMethod === 'mobile_banking' && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col gap-3.5 border-t border-slate-150 pt-3"
-              >
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">মোবাইল ব্যাংকিং অপারেটর</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(['bKash', 'Nagad', 'Rocket', 'Upay'] as const).map((opt) => (
-                      <button
-                        type="button"
-                        key={opt}
-                        onClick={() => setCommMobileMethod(opt)}
-                        className={`py-1.5 text-xs font-bold rounded-lg border text-center transition cursor-pointer ${
-                          commMobileMethod === opt 
-                            ? 'bg-amber-600 text-white border-amber-600' 
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
+          {commissionStep === 1 ? (
+            <form onSubmit={handleCommissionWithdrawal} className="flex flex-col gap-4">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">অবশিষ্ট কমিশন ফান্ড</span>
+                  <span className="text-sm font-bold text-amber-600">৳ {formatCurrency(agent.commissionBalance)} টাকা</span>
                 </div>
+                <BadgePercent className="w-8 h-8 text-amber-600 bg-amber-50 p-1.5 rounded-xl border border-amber-200 animate-pulse" />
+              </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">রিসিভার পারসোনাল মোবাইল অ্যাকাউন্ট নম্বর</label>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">উত্তোলন গেটওয়ে</label>
+                <div className="grid grid-cols-2 gap-3.5">
+                  <button
+                    type="button"
+                    onClick={() => setCommMethod('main_balance')}
+                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
+                      commMethod === 'main_balance' 
+                        ? 'bg-emerald-50 border-emerald-400 text-emerald-800' 
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-55'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">মেইন ওয়ালেট</span>
+                    <span className="text-[9px] mt-0.5 leading-tight text-slate-500">instant-ফ্রি ব্যালেন্স কনভার্ট</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCommMethod('mobile_banking')}
+                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
+                      commMethod === 'mobile_banking' 
+                        ? 'bg-blue-50 border-blue-400 text-blue-800' 
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-55'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">মোবাইল ব্যাংকিং</span>
+                    <span className="text-[9px] mt-0.5 leading-tight text-slate-505">bKash/Nagad ওয়ালেটে ক্যাশআউট</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">উত্তোলন টাকার পরিমাণ</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">৳</span>
                   <input
-                    type="text"
-                    placeholder="যেমনঃ 017XXXXXXXX"
-                    value={receiverNumber}
-                    onChange={(e) => { setErrorMsg(''); setReceiverNumber(e.target.value); }}
-                    className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
+                    type="number"
+                    placeholder="যেমনঃ ১,৫০০"
+                    value={amountInput}
+                    onChange={(e) => { setErrorMsg(''); setAmountInput(e.target.value); }}
+                    className="w-full pl-8 pr-4 py-2 text-sm rounded-lg bg-slate-55 border border-slate-200 focus:border-blue-500 text-slate-850 outline-none transition font-semibold"
+                    max={agent.commissionBalance}
                     required
                   />
                 </div>
-              </motion.div>
-            )}
+              </div>
 
-            <button
-              type="submit"
-              id="confirm_commission_withdrawal"
-              className="w-full py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-sm font-bold text-white transition mt-2 shadow-xs cursor-pointer"
-            >
-              কমিশন উত্তোলন রিকোয়েস্ট নিশ্চিত করুন
-            </button>
-          </form>
+              {commMethod === 'mobile_banking' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col gap-3.5 border-t border-slate-150 pt-3"
+                >
+                  {/* Telegram Contact Notification Box */}
+                  <div className="p-3 bg-sky-50 rounded-xl border border-sky-200 flex items-center justify-between gap-3 text-sky-850 font-sans">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-sky-500/10 flex items-center justify-center text-sky-600 flex-shrink-0">
+                        <Send className="w-4 h-4 ml-0.5" />
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <span className="text-[11px] font-bold text-sky-800">কমিশন ক্যাশআউট সাপোর্ট</span>
+                        <span className="text-[9.5px] text-slate-505 leading-normal mt-0.5">কমিশন রিকোয়েস্ট তৈরি করে পেমেন্ট পেতে সরাসরি আমাদের অফিশিয়াল টেলিগ্রামে মেসেজ দিন।</span>
+                      </div>
+                    </div>
+                    <a
+                      href="https://t.me/bdwalletagent"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-shrink-0 p-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition hover:scale-105 flex items-center justify-center gap-1 cursor-pointer"
+                      title="টেলিগ্রামে মেসেজ দিন"
+                    >
+                      <Send className="w-3.5 h-3.5 ml-0.5 text-white" />
+                    </a>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">মোবাইল ব্যাংকিং অপারেটর</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(['bKash', 'Nagad', 'Rocket', 'Upay'] as const).map((opt) => (
+                        <button
+                          type="button"
+                          key={opt}
+                          onClick={() => setCommMobileMethod(opt)}
+                          className={`py-1.5 text-xs font-bold rounded-lg border text-center transition cursor-pointer ${
+                            commMobileMethod === opt 
+                              ? 'bg-amber-600 text-white border-amber-600' 
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">রিসিভার পারসোনাল মোবাইল অ্যাকাউন্ট নম্বর</label>
+                    <input
+                      type="text"
+                      placeholder="যেমনঃ 017XXXXXXXX"
+                      value={receiverNumber}
+                      onChange={(e) => { setErrorMsg(''); setReceiverNumber(e.target.value); }}
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-slate-55 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
+                      required
+                    />
+                  </div>
+                </motion.div>
+              )}
+
+              <button
+                type="submit"
+                id="confirm_commission_withdrawal"
+                className="w-full py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-sm font-bold text-white transition mt-2 shadow-xs cursor-pointer"
+              >
+                কমিশন উত্তোলন রিকোয়েস্ট নিশ্চিত করুন
+              </button>
+
+              {/* General bottom Telegram quick links */}
+              <div className="flex justify-center items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-sans">
+                <span>যেকোনো প্রয়োজনে সরাসরিঃ</span>
+                <a
+                  href="https://t.me/bdwalletagent"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-600 hover:text-sky-700 font-bold flex items-center gap-1 transition"
+                >
+                  <Send className="w-3.5 h-3.5 ml-0.5 text-sky-600" /> টেলিগ্রামে মেসেজ দিন
+                </a>
+              </div>
+            </form>
+          ) : (
+            <div className="flex flex-col items-center py-1">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-600 mb-3 border border-emerald-500/20">
+                <Check className="w-6 h-6 stroke-[3]" />
+              </div>
+
+              <h4 className="text-sm font-bold text-slate-800 mb-1">কমিশন উত্তোলন রিকোয়েস্ট রসিদ</h4>
+              <p className="text-[10px] text-slate-500 text-center max-w-sm leading-relaxed mb-4">
+                {commMethod === 'mobile_banking' 
+                  ? 'আপনার কমিশন ক্যাশআউট রিকোয়েস্ট সফলভাবে গ্রহণ করা হয়েছে। দ্রুত সাপোর্ট পেতে আবেদনটি টেলিগ্রামে শেয়ার করুন।' 
+                  : 'আপনার উপার্জিত কমিশন ব্যালেন্স তাৎক্ষণিকভাবে মেইন ওয়ালেট ব্যালেন্সে রূপান্তর করা হয়েছে।'}
+              </p>
+
+              {/* Receipt Area */}
+              <div className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-150 relative overflow-hidden font-sans text-left text-xs text-slate-755 leading-relaxed flex flex-col gap-2.5 shadow-3xs mb-4">
+                {/* Decorative cutouts at the side bottom */}
+                <div className="absolute left-0 bottom-0 top-0 w-1 flex flex-col justify-between items-center py-2 gap-1.5 pointer-events-none">
+                  {[...Array(8)].map((_, i) => <span key={i} className="w-1.5 h-1.5 bg-white rounded-full -ml-1 border border-slate-150"></span>)}
+                </div>
+                <div className="absolute right-0 bottom-0 top-0 w-1 flex flex-col justify-between items-center py-2 gap-1.5 pointer-events-none">
+                  {[...Array(8)].map((_, i) => <span key={i} className="w-1.5 h-1.5 bg-white rounded-full -mr-1 border border-slate-150"></span>)}
+                </div>
+
+                <div className="border-b border-dashed border-slate-250 pb-2.5 flex items-center justify-between px-2">
+                  <div className="flex flex-col">
+                    <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wide">অন-লাইন রসিদ আইডি</span>
+                    <span className="text-[11px] font-mono font-bold text-slate-700">COM-WD-{toBanglaNum(Date.now().toString().slice(-6))}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wide block">তারিখ ও সময়</span>
+                    <span className="text-[10.5px] text-slate-600 font-semibold">{toBanglaNum(new Date().toLocaleDateString('bn-BD'))} | {toBanglaNum(new Date().toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' }))}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 px-2 border-b border-dashed border-slate-250 pb-2.5">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">এজেন্ট আইডি:</span>
+                    <code className="font-mono text-slate-800 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{agent.id}</code>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">উত্তোলন গেটওয়ে (Method):</span>
+                    <span className="font-bold text-slate-800">
+                      {commMethod === 'mobile_banking' 
+                        ? `${commMobileMethod === 'bKash' ? 'বিকাশ (bKash)' : commMobileMethod === 'Nagad' ? 'নগদ (Nagad)' : commMobileMethod === 'Rocket' ? 'রকেট (Rocket)' : 'উপায় (Upay)'}` 
+                        : 'মেইন ওয়ালেট কনভার্ট'}
+                    </span>
+                  </div>
+                  {commMethod === 'mobile_banking' && (
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-slate-400">রিসিভার নম্বর (Account):</span>
+                      <span className="font-mono font-bold text-slate-800">{toBanglaNum(receiverNumber)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">রিকোয়েস্ট স্ট্যাটাস:</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      commMethod === 'mobile_banking' 
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200' 
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    }`}>
+                      {commMethod === 'mobile_banking' ? 'পেন্ডিং / পেমেন্ট অপেক্ষায়' : 'সফল / ওয়ালেটে যোগকৃত'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-1 px-2">
+                  <span className="text-slate-500 font-bold">মোট উত্তোলিত টাকা:</span>
+                  <span className="text-sm font-black text-blue-700">৳ {formatCurrency(commAmountValue)} টাকা</span>
+                </div>
+              </div>
+
+              {commMethod === 'mobile_banking' ? (
+                <>
+                  <div className="bg-sky-50 border border-sky-150 p-3 rounded-xl text-[11px] text-sky-850 mb-4 flex flex-col gap-1.5 text-center leading-normal">
+                    <span className="font-bold text-sky-900 flex items-center gap-1 justify-center">
+                      <Send className="w-3.5 h-3.5 text-sky-600 ml-0.5" /> টেলিগ্রামে মেসেজ দিয়ে পেমেন্ট নিন!
+                    </span>
+                    <span>তাত্ক্ষণিক পেমেন্ট রিলিজ করতে নিচের বাটনে চাপুন। মেসেজে আপনার রসিদের বিস্তারিত তথ্য স্বয়ংক্রিয়ভাবে ইনপুট করা থাকবে।</span>
+                  </div>
+
+                  <a
+                    href={`https://t.me/bdwalletagent?text=${encodeURIComponent(
+                      `আসসালামু আলাইকুম এডমিন, আমি উপার্জিত কমিশন উত্তোলনের অন-লাইন রিকোয়েস্ট সাবমিট করেছি। অনুগ্রহ করে চেক করে পেমেন্ট সম্পূর্ণ করুন:\n\n👤 এজেন্ট আইডি: ${agent.id}\n👤 এজেন্টের নাম: ${agent.name}\n💰 উত্তোলনের পরিমাণ: ৳ ${commAmountValue.toLocaleString('en-US')} টাকা\n💳 গেটওয়ে: ${commMobileMethod} (${receiverNumber})\n🆔 রসিদ আইডি: COM-WD-${Date.now().toString().slice(-6)}\n\nধন্যবাদ!`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-3 rounded-xl bg-[#229ED9] hover:bg-[#1a85b9] text-xs font-extrabold text-white flex items-center justify-center gap-2.5 transition shadow-sm cursor-pointer group animate-pulse hover:animate-none"
+                  >
+                    <Send className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> 
+                    টেলিগ্রামে অটোমেটিক মেসেজ পাঠান
+                  </a>
+                </>
+              ) : (
+                <div className="bg-emerald-50 border border-emerald-150 p-3 rounded-xl text-[11px] text-emerald-850 mb-4 text-center leading-normal w-full">
+                  <span className="font-bold text-emerald-900 block mb-0.5">মেইন ওয়ালেট সফলভাবে রিচার্জ হয়েছে!</span>
+                  <span>৳ {formatCurrency(commAmountValue)} টাকা আপনার মেইন ব্যালেন্সে যুক্ত হয়েছে। কোনো প্রকার চার্জ ছাড়াই তাৎক্ষণিক লেনদেন সুবিধা পাবেন।</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCommissionStep(1);
+                  onClose();
+                }}
+                className="w-full mt-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs text-slate-650 font-bold transition cursor-pointer"
+              >
+                ওয়ালেট প্যানেলে ফিরে যান
+              </button>
+            </div>
+          )}
         </ModalContainer>
       )}
 
       {/* 5. TRANSACTION HISTORY MODAL */}
       {type === 'history' && (
         <ModalContainer title="এজেন্ট লেজার ট্রানজেকশন হিস্ট্রি" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
-          <div className="flex flex-col gap-3.5 max-h-[70vh]">
+          <div className="flex flex-col gap-3.5 max-h-[72vh] overflow-hidden">
             {/* Filter Section */}
             <div className="flex flex-col gap-2">
               <input
                 type="text"
-                placeholder="খেলোয়াড় আইডি বা লেনদেন আইডি দিয়ে খুজুন..."
+                placeholder="খেলোয়াড় আইডি, মেথড বা লেনদেন আইডি দিয়ে খুঁজুন..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-700 outline-none transition"
               />
 
-              <div className="grid grid-cols-3 gap-1.5 text-xs">
-                {(['all', 'deposit', 'withdraw'] as const).map((t) => (
+              <div className="flex flex-wrap gap-1 text-[11px] max-h-24 overflow-y-auto no-scrollbar">
+                {(['all', 'deposit', 'withdraw', 'balance_add', 'commission_withdraw'] as const).map((t) => (
                   <button
                     type="button"
                     key={t}
                     onClick={() => setHistoryType(t)}
-                    className={`py-1.5 font-bold rounded-lg border text-center capitalize transition cursor-pointer ${
+                    className={`px-2.5 py-1.5 font-bold rounded-lg border text-center transition cursor-pointer text-[10px] sm:text-[10.5px] ${
                       historyType === t
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    {t === 'all' ? 'সব লেনদেন' : t === 'deposit' ? 'ডিপোজিট' : 'উইথড্রয়াল'}
+                    {t === 'all' && 'সব লেনদেন'}
+                    {t === 'deposit' && 'চলতি ডিপোজিট'}
+                    {t === 'withdraw' && 'চলতি উইথড্রয়াল'}
+                    {t === 'balance_add' && 'ব্যালেন্স রিচার্জ'}
+                    {t === 'commission_withdraw' && 'কমিশন উত্তোলন'}
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Transaction List */}
-            <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-2.5 max-h-96 pr-0.5">
+            <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-2.5 max-h-[340px] pr-0.5">
               {filteredHistory.length === 0 ? (
                 <div className="text-center py-12 text-xs text-slate-500 flex flex-col items-center gap-1.5">
                   <History className="w-8 h-8 text-slate-400 opacity-60" />
                   <span>কোন লেনদেন তথ্য পাওয়া যায়নি।</span>
                 </div>
               ) : (
-                filteredHistory.map((t) => (
-                  <div
-                    key={t.id}
-                    className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl flex items-center justify-between transition-colors duration-200 shadow-3xs"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className={`p-2 rounded-lg border flex-shrink-0 ${
-                        t.type === 'deposit' 
-                          ? 'bg-rose-50 border-rose-100 text-rose-700' 
-                          : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                      }`}>
-                        {t.type === 'deposit' ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
+                filteredHistory.map((t) => {
+                  const tType = t.type as string;
+                  const isDeposit = tType === 'deposit';
+                  const isDepositRej = tType === 'deposit_rejected' || tType === 'deposit_cancelled';
+                  const isWithdraw = tType === 'withdraw';
+                  const isWithdrawRej = tType === 'withdraw_rejected' || tType === 'withdraw_cancelled';
+                  const isBalanceAdd = tType === 'balance_add';
+                  const isBalanceRej = tType === 'balance_rejected';
+                  const isComWithdraw = tType === 'commission_withdraw';
+
+                  let iconColor = "bg-slate-50 border-slate-100 text-slate-700";
+                  let itemIcon = <ArrowDownLeft className="w-4 h-4" />;
+                  let displayTypeStr = "লেনদেন";
+                  let amountPrefix = "";
+                  let amountColor = "text-slate-800";
+                  let commissionText = "";
+                  let isAmountStriked = false;
+
+                  if (isDeposit) {
+                    iconColor = "bg-amber-50 border-amber-100 text-amber-700";
+                    itemIcon = <ArrowUpRight className="w-4 h-4" />;
+                    displayTypeStr = "ডিপোজিট";
+                    amountPrefix = "-";
+                    amountColor = "text-rose-600 font-semibold";
+                    commissionText = `+ ৳ ${toBanglaNum(t.comAmount || 0)} (কমিশন BDT)`;
+                  } else if (isDepositRej) {
+                    iconColor = "bg-rose-50 border-rose-100 text-rose-600";
+                    itemIcon = <ArrowUpRight className="w-4 h-4 text-rose-500" />;
+                    displayTypeStr = "ডিপোজিট বাতিল";
+                    amountPrefix = "✖";
+                    amountColor = "text-slate-400 line-through";
+                    isAmountStriked = true;
+                    commissionText = "ব্যর্থ লেনদেন";
+                  } else if (isWithdraw) {
+                    iconColor = "bg-emerald-50 border-emerald-100 text-emerald-700";
+                    itemIcon = <ArrowDownLeft className="w-4 h-4 text-emerald-600" />;
+                    displayTypeStr = "উইথড্রয়াল";
+                    amountPrefix = "+";
+                    amountColor = "text-emerald-700";
+                    commissionText = `+ ৳ ${toBanglaNum(t.comAmount || 0)} (কমিশন BDT)`;
+                  } else if (isWithdrawRej) {
+                    iconColor = "bg-rose-50 border-rose-100 text-rose-600";
+                    itemIcon = <ArrowDownLeft className="w-4 h-4 text-rose-500" />;
+                    displayTypeStr = "উইথড্রয়াল বাতিল";
+                    amountPrefix = "✖";
+                    amountColor = "text-slate-400 line-through";
+                    isAmountStriked = true;
+                    commissionText = "ব্যর্থ লেনদেন";
+                  } else if (isBalanceAdd) {
+                    iconColor = "bg-blue-50 border-blue-100 text-blue-700";
+                    itemIcon = <Coins className="w-4 h-4 text-blue-600" />;
+                    displayTypeStr = "ব্যালেন্স রিচার্জ";
+                    amountPrefix = "+";
+                    amountColor = "text-blue-700 font-bold";
+                    commissionText = "ওয়ালেটে যোগ হয়েছে";
+                  } else if (isBalanceRej) {
+                    iconColor = "bg-slate-100 border-slate-200 text-slate-500";
+                    itemIcon = <X className="w-4 h-4 text-slate-400" />;
+                    displayTypeStr = "রিচার্জ বাতিল";
+                    amountPrefix = "✖";
+                    amountColor = "text-slate-400 line-through";
+                    isAmountStriked = true;
+                    commissionText = "অ্যাডমিন রিজেক্টেড";
+                  } else if (isComWithdraw) {
+                    iconColor = "bg-purple-50 border-purple-100 text-purple-700";
+                    itemIcon = <BadgePercent className="w-4 h-4 text-purple-600" />;
+                    displayTypeStr = "কমিশন উত্তোলন";
+                    amountPrefix = "-";
+                    amountColor = "text-purple-700 font-bold";
+                    commissionText = "ওয়ালেটে ট্রান্সফার";
+                  }
+
+                  return (
+                    <div
+                      key={t.id}
+                      className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl flex items-center justify-between transition-colors duration-200 shadow-3xs gap-2"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className={`p-2 rounded-lg border flex-shrink-0 ${iconColor}`}>
+                          {itemIcon}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                            <span className="truncate">{t.playerName || 'এজেন্ট'}</span>
+                            <span className="text-[8.5px] font-sans font-bold bg-slate-100 text-slate-600 border border-slate-200 px-1 py-0.2 rounded uppercase">
+                              {t.method || 'ওয়ালেট'}
+                            </span>
+                            <span className={`text-[8.5px] font-sans font-bold px-1 py-0.2 rounded uppercase ${
+                              isDeposit || isWithdraw || isBalanceAdd ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' :
+                              isComWithdraw ? 'bg-purple-50 text-purple-700 border border-purple-150' : 'bg-rose-50 text-rose-700 border border-rose-150'
+                            }`}>
+                              {displayTypeStr}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5 min-w-0">
+                            {t.playerId && t.playerId !== 'ADMIN_GATEWAY' && t.playerId !== 'COMMISSION_FUND' && (
+                              <code className="text-blue-600 font-mono font-semibold truncate max-w-[80px]">{t.playerId}</code>
+                            )}
+                            {t.playerId && t.playerId !== 'ADMIN_GATEWAY' && t.playerId !== 'COMMISSION_FUND' && <span>•</span>}
+                            <span className="text-[9px] text-slate-400 truncate max-w-[100px]" title={t.id}>{t.id}</span>
+                            <span>•</span>
+                            <span>{toBanglaNum(new Date(t.timestamp).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' }))}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          {t.playerName}
-                          <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.2 rounded uppercase">
-                            {t.method}
+
+                      <div className="flex items-center gap-2 flex-shrink-0 text-right">
+                        <div className="flex flex-col items-end">
+                          <span className={`text-xs font-bold font-sans ${amountColor}`}>
+                            {amountPrefix} ৳ {formatCurrency(t.amount)}
+                          </span>
+                          <span className={`text-[8.5px] block font-bold leading-3 mt-0.5 ${
+                            isDeposit || isWithdraw ? 'text-emerald-750' : 'text-slate-400'
+                          }`}>
+                            {commissionText}
                           </span>
                         </div>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap-reverse mt-0.5">
-                          <code className="text-blue-600 font-mono font-semibold">{t.playerId}</code>
-                          <span>•</span>
-                          <span>{toBanglaNum(new Date(t.timestamp).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' }))}</span>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm('আপনি কি এই লেনদেন রেকর্ডটি সম্পূর্ণভাবে ডিলিট করতে চান?')) {
+                              onDeleteTransaction(t.id);
+                            }
+                          }}
+                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-650 rounded-lg transition-transform hover:scale-105 cursor-pointer flex items-center justify-center border border-red-100"
+                          title="লেনদেন হিস্ট্রি ডিলিট করুন"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-650" />
+                        </button>
                       </div>
                     </div>
-
-                    <div className="text-right">
-                      <span className={`text-xs font-bold font-sans ${t.type === 'withdraw' ? 'text-emerald-700 font-bold' : 'text-slate-800'}`}>
-                        {t.type === 'withdraw' ? '+' : '-'} ৳ {formatCurrency(t.amount)}
-                      </span>
-                      <span className="text-[8.5px] text-emerald-700 block font-bold leading-3 mt-0.5">
-                        + ৳ {toBanglaNum((t.comAmount))} (কমিশন)
-                      </span>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -1320,7 +1593,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
           <div className="flex flex-col gap-4">
             <div className="p-4 bg-purple-50 border border-purple-100 rounded-xl text-center">
               <span className="text-[10px] uppercase font-bold tracking-wider text-purple-800 block mb-1">আপনার ইউনিক রেফারেল কোড</span>
-              <div className="flex items-center justify-center gap-2 bg-white p-2.5 rounded-lg border border-purple-200 w-fit mx-auto shadow-3xs mt-1.5">
+              <div className="flex items-center justify-center gap-2 bg-white p-2.5 rounded-lg border border-purple-200 w-fit mx-auto shadow-3xs mt-1.5 font-sans">
                 <span className="text-base font-black text-purple-900 tracking-widest font-mono select-all">
                   {agent.referralCode}
                 </span>
@@ -1350,7 +1623,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 font-sans overflow-hidden">
               <h5 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-150 pb-1 font-sans">আমন্ত্রিত সাব-এজেন্ট সমূহ</h5>
               <div className="flex flex-col gap-2 max-h-36 overflow-y-auto no-scrollbar">
                 {[
@@ -1451,25 +1724,81 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
 
       {/* 9. AGENT PROFILE MODAL */}
       {type === 'profile' && (
-        <ModalContainer title="এজেন্ট প্রোফাইল ডিটেইলস" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
-          <form onSubmit={handleProfileUpdateSubmit} className="flex flex-col gap-4 font-sans text-slate-700">
-            {/* Read-Only Identity Card */}
-            <div className="p-4 rounded-2xl bg-gradient-to-tr from-slate-900 to-slate-800 text-white flex flex-col gap-1.5 shadow-sm">
-              <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">এজেন্ট পরিচিতি</div>
-              <div className="text-base font-bold">{agent.name}</div>
-              <div className="flex justify-between items-center text-xs text-slate-350">
-                <span>আইডি: {agent.id.toUpperCase()}</span>
-                <span className="font-mono text-[11px] bg-slate-700/60 px-2 py-0.5 rounded-md">
-                  ৳ {formatCurrency(agent.balance)}
-                </span>
+        <ModalContainer title="স্মার্ট এজেন্ট আইডি প্রোফাইল" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
+          <form onSubmit={handleProfileUpdateSubmit} className="flex flex-col gap-5 font-sans text-slate-700">
+            {/* Red-Only Identity Card */}
+            <div className="p-5 rounded-2.5xl bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-950 text-white flex flex-col gap-4 shadow-md relative overflow-hidden border border-slate-800">
+              {/* Card gloss background highlights */}
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="flex items-center gap-3.5 relative z-10">
+                {/* Profile Avatar / Logo with Pulsing pipeline */}
+                <div className="relative flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-xl shadow-inner border border-white/20 select-none uppercase">
+                    {(profileName || agent.name || 'A').slice(0, 1)}
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-slate-950 rounded-full flex items-center justify-center">
+                    <span className="absolute w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
+                  </span>
+                </div>
+
+                {/* Identity Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-sm font-extrabold text-slate-100 truncate">{profileName || agent.name}</span>
+                    <span className="text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded-full uppercase tracking-wide flex items-center gap-0.5">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" /> Verified Agent
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-slate-400 font-medium">আইডি:</span>
+                    <code className="text-xs font-mono font-bold text-indigo-300">{agent.id.toUpperCase()}</code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(agent.id);
+                        setIdCopied(true);
+                        setTimeout(() => setIdCopied(false), 2000);
+                      }}
+                      className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                      title="আইডি কপি করুন"
+                    >
+                      {idCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card stats and info divider */}
+              <div className="h-px bg-slate-800" />
+
+              {/* Core balance and commission credentials */}
+              <div className="grid grid-cols-2 gap-2 relative z-10">
+                <div className="bg-white/5 border border-white/5 p-2.5 rounded-xl flex flex-col gap-0.5">
+                  <span className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider">চলতি ব্যালেন্স</span>
+                  <span className="text-sm font-black text-amber-400 font-sans">
+                    ৳ {formatCurrency(agent.balance)}
+                  </span>
+                </div>
+
+                <div className="bg-white/5 border border-white/5 p-2.5 rounded-xl flex flex-col gap-0.5">
+                  <span className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider">কমিশন রেট</span>
+                  <span className="text-[10.5px] font-extrabold text-[#229ED9] leading-5">
+                    ডিপোজিট: ৩.০% | উইথড্র: ২.০%
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Editable Fields */}
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4 bg-slate-50 p-4 rounded-2.5xl border border-slate-150">
+              <span className="text-[11px] font-black text-slate-505 uppercase tracking-wider block mb-1">অ্যাকাউন্ট ভেরিফিকেশন তথ্য</span>
+              
               {/* Name */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-extrabold text-slate-505 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-blue-600" />
                   এজেন্ট নাম
                 </label>
@@ -1477,87 +1806,89 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                   type="text"
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:outline-none transition leading-normal font-semibold text-slate-800 focus:ring-3 focus:ring-indigo-150"
                   placeholder="আপনার নাম লিখুন"
                   required
                 />
               </div>
 
               {/* Phone */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-orange-600" />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-extrabold text-slate-505 flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-orange-650" />
                   মোবাইল নাম্বার
                 </label>
                 <input
                   type="text"
                   value={profilePhone}
                   onChange={(e) => setProfilePhone(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:outline-none transition leading-normal font-semibold text-slate-800 focus:ring-3 focus:ring-indigo-150"
                   placeholder="১১ ডিজিটের মোবাইল নাম্বার"
                   required
                 />
               </div>
 
               {/* Email */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-extrabold text-slate-505 flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-indigo-600" />
                   ইমেইল এড্রেস
                 </label>
                 <input
-                  type="email"
+                  type="type"
                   value={profileEmail}
                   onChange={(e) => setProfileEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:outline-none transition leading-normal font-semibold text-slate-800 focus:ring-3 focus:ring-indigo-150"
                   placeholder="আপনার ইমেইল অ্যাড্রেস"
                 />
               </div>
 
-              {/* DOB */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  জন্ম তারিখ
-                </label>
-                <input
-                  type="date"
-                  value={profileDob}
-                  onChange={(e) => setProfileDob(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
+              <div className="grid grid-cols-2 gap-3.5">
+                {/* DOB */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-extrabold text-slate-505 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                    জন্ম তারিখ
+                  </label>
+                  <input
+                    type="date"
+                    value={profileDob}
+                    onChange={(e) => setProfileDob(e.target.value)}
+                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:outline-none transition leading-normal font-semibold text-slate-800 focus:ring-3 focus:ring-indigo-150"
+                  />
+                </div>
 
-              {/* Password */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-rose-600" />
-                  পাসওয়ার্ড পরিবর্তন করুন
-                </label>
-                <input
-                  type="text"
-                  value={profilePassword}
-                  onChange={(e) => setProfilePassword(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                  placeholder="পাসওয়ার্ড"
-                />
+                {/* Password */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-extrabold text-slate-505 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-rose-600" />
+                    পাসওয়ার্ড পরিবর্তন করুন
+                  </label>
+                  <input
+                    type="text"
+                    value={profilePassword}
+                    onChange={(e) => setProfilePassword(e.target.value)}
+                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:border-indigo-500 focus:outline-none transition leading-normal font-semibold text-slate-800 focus:ring-3 focus:ring-indigo-150"
+                    placeholder="পাসওয়ার্ড"
+                  />
+                </div>
               </div>
             </div>
 
             {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-3 mt-2">
+            <div className="grid grid-cols-2 gap-3 mt-1.5">
               <button
                 type="button"
                 onClick={onClose}
-                className="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+                className="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer border border-slate-200"
               >
                 বাতিল করুন
               </button>
               <button
                 type="submit"
-                className="py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition hover:scale-[1.01] shadow-2xs cursor-pointer"
+                className="py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition hover:scale-[1.01] shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
               >
-                সংরক্ষণ করুন
+                তথ্য সংরক্ষণ করুন
               </button>
             </div>
           </form>

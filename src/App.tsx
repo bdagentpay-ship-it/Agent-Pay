@@ -18,7 +18,8 @@ import {
   onSnapshot, 
   query, 
   orderBy, 
-  limit 
+  limit,
+  deleteDoc
 } from 'firebase/firestore';
 import { 
   Agent, 
@@ -538,6 +539,19 @@ export default function App() {
     updateFirebaseDoc('transactions', newTrans.id, newTrans);
   };
 
+  const deleteTransaction = async (txId: string) => {
+    const updated = transactions.filter(t => t.id !== txId);
+    setTransactions(updated);
+    saveLocalData('transactions', updated);
+    try {
+      if (db) {
+        await deleteDoc(doc(db, 'transactions', txId));
+      }
+    } catch (e) {
+      console.warn("Firestore delete failed for transaction ID:", txId, e);
+    }
+  };
+
   const appendNotification = (newNotif: NotificationItem) => {
     const updated = [newNotif, ...notifications];
     setNotifications(updated);
@@ -694,6 +708,24 @@ export default function App() {
         type: 'general'
       };
       appendNotification(newNotif);
+
+      const rejTrans: Transaction = {
+        id: request.id + "-REJ-" + Date.now(),
+        type: request.type === 'deposit' ? 'deposit_rejected' as any : 'withdraw_rejected' as any,
+        playerId: request.playerId,
+        playerName: 'প্লেয়ার (' + request.playerId + ') - বাতিলকৃত',
+        amount: request.amount,
+        comPercent: 0,
+        comAmount: 0,
+        method: request.paymentMethod,
+        timestamp: Date.now(),
+        status: 'failed',
+        agentId: agent.id,
+        siteName: request.siteName,
+        senderNumber: request.senderNumber,
+        txid: request.txid
+      };
+      appendTransaction(rejTrans);
     }
   };
 
@@ -872,6 +904,21 @@ export default function App() {
         type: 'commission'
       };
       appendNotification(newNotif);
+
+      const comTrans: Transaction = {
+        id: "COM-WD-MB-" + Date.now(),
+        type: 'commission_withdraw' as any,
+        playerId: 'COMMISSION_FUND',
+        playerName: 'কমিশন কনভার্ট (ওয়ালেট)',
+        amount,
+        comPercent: 0,
+        comAmount: 0,
+        method: 'bKash',
+        timestamp: Date.now(),
+        status: 'completed',
+        agentId: agent.id
+      };
+      appendTransaction(comTrans);
     } else {
       // Mobile banking withdrawal request (simulated complete)
       const nextAgent: Agent = {
@@ -889,6 +936,22 @@ export default function App() {
         type: 'commission'
       };
       appendNotification(newNotif);
+
+      const comTrans: Transaction = {
+        id: "COM-WD-MBANK-" + Date.now(),
+        type: 'commission_withdraw' as any,
+        playerId: 'COMMISSION_FUND',
+        playerName: `কমিশন ক্যাশআউট (${mobileMethod === 'bKash' ? 'বিকাশ' : mobileMethod === 'Nagad' ? 'নগদ' : mobileMethod === 'Rocket' ? 'রকেট' : mobileMethod || 'মোবাইল ব্যাংকিং'})`,
+        amount,
+        comPercent: 0,
+        comAmount: 0,
+        method: mobileMethod || 'bKash',
+        timestamp: Date.now(),
+        status: 'completed',
+        agentId: agent.id,
+        senderNumber: receiverNum
+      };
+      appendTransaction(comTrans);
     }
   };
 
@@ -946,6 +1009,23 @@ export default function App() {
     };
     appendNotification(newNotif);
 
+    const balTrans: Transaction = {
+      id: targetReq.id + "-APRV-" + Date.now(),
+      type: 'balance_add' as any,
+      playerId: 'ADMIN_GATEWAY',
+      playerName: `ব্যালেন্স রিচার্জ (অনুমোদিত)`,
+      amount: targetReq.amount,
+      comPercent: 0,
+      comAmount: 0,
+      method: (targetReq.method === 'Bank' ? 'Rocket' : targetReq.method) as any, // fallback standard enum
+      timestamp: Date.now(),
+      status: 'completed',
+      agentId: targetAgentId,
+      senderNumber: targetReq.senderNumber,
+      txid: targetReq.txid
+    };
+    appendTransaction(balTrans);
+
     // Update request status
     const approvedRequest: BalanceRequest = { ...targetReq, status: 'approved' as const };
 
@@ -980,6 +1060,23 @@ export default function App() {
       type: 'general'
     };
     appendNotification(newNotif);
+
+    const balTrans: Transaction = {
+      id: targetReq.id + "-REJ-" + Date.now(),
+      type: 'balance_rejected' as any,
+      playerId: 'ADMIN_GATEWAY',
+      playerName: `ব্যালেন্স রিচার্জ (বাতিলকৃত)`,
+      amount: targetReq.amount,
+      comPercent: 0,
+      comAmount: 0,
+      method: (targetReq.method === 'Bank' ? 'Rocket' : targetReq.method) as any, // fallback standard enum
+      timestamp: Date.now(),
+      status: 'failed',
+      agentId: targetReq.agentId || agent.id,
+      senderNumber: targetReq.senderNumber,
+      txid: targetReq.txid
+    };
+    appendTransaction(balTrans);
 
     const rejectedRequest: BalanceRequest = { ...targetReq, status: 'rejected' as const };
 
@@ -1692,6 +1789,7 @@ export default function App() {
             timeLeft={timeLeft}
             onTriggerPlayerRequest={triggerNewRandomPlayerRequest}
             onUpdateProfile={handleUpdateProfile}
+            onDeleteTransaction={deleteTransaction}
           />
         )}
       </AnimatePresence>
