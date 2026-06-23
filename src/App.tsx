@@ -30,6 +30,7 @@ import {
 } from './types';
 import { 
   DEFAULT_AGENT, 
+  IMRAN_AGENT,
   INITIAL_TRANSACTIONS, 
   INITIAL_NOTIFICATIONS, 
   INITIAL_BALANCE_REQUESTS, 
@@ -94,6 +95,53 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminLoginError, setAdminLoginError] = useState('');
+  const [loadedAdminRequest, setLoadedAdminRequest] = useState<BalanceRequest | null>(null);
+  const [isAdminRequestLoading, setIsAdminRequestLoading] = useState<boolean>(false);
+  const [adminFetchError, setAdminFetchError] = useState<string | null>(null);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null);
+
+  // Fetch specific balance request from Firestore if adminRequestId is set
+  useEffect(() => {
+    if (!adminRequestId || !db) {
+      setLoadedAdminRequest(null);
+      setAdminFetchError(null);
+      return;
+    }
+
+    const cleanId = adminRequestId.trim();
+    setIsAdminRequestLoading(true);
+    setAdminFetchError(null);
+    const docRef = doc(db, 'balance_requests', cleanId);
+
+    getDoc(docRef).then((docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as BalanceRequest;
+        setLoadedAdminRequest(data);
+        setAdminFetchError(null);
+      } else {
+        console.warn("Admin request not found in Firestore on immediate fetch:", cleanId);
+        setAdminFetchError(`অনুরোধটি ডাটাबेসে খুঁজে পাওয়া যায়নি (আইডি: ${cleanId})। অনুগ্রহ করে নিশ্চিত করুন যে এজেন্ট সফলভাবে অনুরোধটি সাবমিট করেছে এবং লিংকটি সঠিক।`);
+      }
+      setIsAdminRequestLoading(false);
+    }).catch((err) => {
+      console.error("Error fetching admin request directly:", err);
+      setAdminFetchError(`সার্ভার থেকে অনুরোধটি সরাসরি লোড করার সময় সমস্যা হয়েছে: ${err instanceof Error ? err.message : String(err)}`);
+      setIsAdminRequestLoading(false);
+    });
+
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as BalanceRequest;
+        setLoadedAdminRequest(data);
+        setAdminFetchError(null);
+      }
+    }, (err) => {
+      console.warn("Error listening to specific admin request document:", err);
+      setAdminFetchError((prev) => prev || `রিয়েলটাইম আপডেট শুনতে সমস্যা হয়েছে: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+    return () => unsub();
+  }, [adminRequestId]);
 
   // System States
   const [isFirebaseSynced, setIsFirebaseSynced] = useState(true);
@@ -104,7 +152,13 @@ export default function App() {
   useEffect(() => {
     // Attempt local storage loadings
     const localAgent = loadLocalData<Agent>('agent', { ...DEFAULT_AGENT, id: selectedAgentId });
-    const localAllAgents = loadLocalData<Agent[]>('all_agents', [DEFAULT_AGENT]);
+    const loadedAll = loadLocalData<Agent[]>('all_agents', [DEFAULT_AGENT, IMRAN_AGENT]);
+    
+    // Inject Imran's agent if missing (e.g. from prior wipe or empty cache fallback)
+    const localAllAgents = !loadedAll.some(a => a.email === 'imran@gmail.com')
+      ? [IMRAN_AGENT, ...loadedAll]
+      : loadedAll;
+
     const localTransactions = loadLocalData<Transaction[]>('transactions', INITIAL_TRANSACTIONS);
     const localNotifications = loadLocalData<NotificationItem[]>('notifications', INITIAL_NOTIFICATIONS);
     const localRequests = loadLocalData<BalanceRequest[]>('balance_requests', INITIAL_BALANCE_REQUESTS);
@@ -120,6 +174,18 @@ export default function App() {
 
   // 1b. Helper: Trigger New Player Offering
   const triggerNewRandomPlayerRequest = useCallback((manualType?: 'deposit' | 'withdraw') => {
+    // Calculate total agent deposit (approved recharges from admin)
+    const totalAgentDeposit = balanceRequests
+      .filter(r => r.status === 'approved' && (r.agentId === agent.id || (!r.agentId && agent.id === 'default_agent')))
+      .reduce((sum, r) => sum + r.amount, 0);
+
+    if (totalAgentDeposit <= 0) {
+      if (manualType) {
+        alert("⚠️ আপনি এখনো কোনো জমা প্রদান (ডিপোজিট রিচার্জ) করেননি! অনুগ্রহ করে আগে অ্যাডমিন গেটওয়েতে রিচার্জ অনুরোধ পাঠান এবং এডমিন দ্বারা অনুরোধটি এপ্রুভ হওয়ার পর এখানে খেলোয়াড় অনুরোধ পাবেন।");
+      }
+      return;
+    }
+
     const chosenType = manualType || (Math.random() > 0.4 ? 'deposit' : 'withdraw');
     
     if (chosenType === 'deposit' && agent.balance < 300) {
@@ -157,13 +223,24 @@ export default function App() {
       type: chosenType
     };
     appendNotification(newNotif);
-  }, [playerRequestsPool, playerRequests, agent]);
+  }, [playerRequestsPool, playerRequests, agent, balanceRequests]);
 
   // 1c. Initial Load of Player Pools & Seed Queue
   useEffect(() => {
     const savedActive = loadLocalData<PlayerRequest[]>('player_requests', []);
     const savedPool = loadLocalData<PlayerRequest[]>('player_requests_pool', []);
+    const savedBalanceRequests = loadLocalData<BalanceRequest[]>('balance_requests', INITIAL_BALANCE_REQUESTS);
     
+    const totalAgentDeposit = savedBalanceRequests
+      .filter(r => r.status === 'approved' && (r.agentId === agent.id || (!r.agentId && agent.id === 'default_agent')))
+      .reduce((sum, r) => sum + r.amount, 0);
+
+    if (totalAgentDeposit <= 0) {
+      setPlayerRequests([]);
+      saveLocalData('player_requests', []);
+      return;
+    }
+
     let active = [...savedActive];
     let pool = [...savedPool];
     
@@ -317,7 +394,8 @@ export default function App() {
           saveLocalData('agent', fetchedAgent);
         } else {
           // If first time, write default data to cloud
-          setDoc(agentDocRef, { ...DEFAULT_AGENT, id: selectedAgentId });
+          const fallbackToSave = selectedAgentId === 'imran_agent' ? IMRAN_AGENT : DEFAULT_AGENT;
+          setDoc(agentDocRef, { ...fallbackToSave, id: selectedAgentId });
         }
         setIsFirebaseSynced(true);
       }, (err) => {
@@ -336,11 +414,12 @@ export default function App() {
         
         // Sort by timestamp desc
         const sorted = list.sort((a,b) => b.timestamp - a.timestamp);
-        if (sorted.length > 0) {
-          setTransactions(sorted);
-          saveLocalData('transactions', sorted);
-        }
+        setTransactions(sorted);
+        saveLocalData('transactions', sorted);
+        setFirebaseError(null);
       }, (err) => {
+        console.warn("Firestore transactions listen failed:", err);
+        setFirebaseError(err instanceof Error ? err.message : String(err));
         setIsFirebaseSynced(false);
       });
 
@@ -352,11 +431,12 @@ export default function App() {
           list.push(doc.data() as BalanceRequest);
         });
         const sorted = list.sort((a,b) => b.timestamp - a.timestamp);
-        if (sorted.length > 0) {
-          setBalanceRequests(sorted);
-          saveLocalData('balance_requests', sorted);
-        }
+        setBalanceRequests(sorted);
+        saveLocalData('balance_requests', sorted);
+        setFirebaseError(null);
       }, (err) => {
+        console.warn("Firestore balance_requests listen failed:", err);
+        setFirebaseError(err instanceof Error ? err.message : String(err));
         setIsFirebaseSynced(false);
       });
 
@@ -368,11 +448,12 @@ export default function App() {
           list.push(doc.data() as NotificationItem);
         });
         const sorted = list.sort((a,b) => b.timestamp - a.timestamp);
-        if (sorted.length > 0) {
-          setNotifications(sorted);
-          saveLocalData('notifications', sorted);
-        }
+        setNotifications(sorted);
+        saveLocalData('notifications', sorted);
+        setFirebaseError(null);
       }, (err) => {
+        console.warn("Firestore notifications listen failed:", err);
+        setFirebaseError(err instanceof Error ? err.message : String(err));
         setIsFirebaseSynced(false);
       });
 
@@ -383,14 +464,42 @@ export default function App() {
         snap.forEach((doc) => {
           list.push(doc.data() as Agent);
         });
-        // Sort: make default agent show first in lists
-        const sorted = list.sort((a, b) => (a.id === 'default_agent' ? -1 : b.id === 'default_agent' ? 1 : 0));
-        if (sorted.length > 0) {
-          setAllAgents(sorted);
-          saveLocalData('all_agents', sorted);
+
+        // Load the current local agents from local storage
+        const localList = loadLocalData<Agent[]>('all_agents', [DEFAULT_AGENT, IMRAN_AGENT]);
+        
+        // Ensure Imran profile is injected locally too just in case
+        if (!localList.some(a => a.email === 'imran@gmail.com')) {
+          localList.unshift(IMRAN_AGENT);
         }
+
+        // Upload any agent that exists locally but is missing in Firestore
+        const missingInFirestore = localList.filter(
+          la => !list.some(fa => fa.id === la.id)
+        );
+
+        if (missingInFirestore.length > 0) {
+          missingInFirestore.forEach((missingAgent) => {
+            setDoc(doc(db, 'agents', missingAgent.id), missingAgent).catch(err => {
+              console.warn("Unable to sync local agent profile to cloud database:", err);
+            });
+          });
+        }
+
+        // Merge to prevent local data from being wiped or hidden before Firestore writes complete
+        const mergedMap = new Map<string, Agent>();
+        localList.forEach(a => mergedMap.set(a.id, a));
+        list.forEach(a => mergedMap.set(a.id, a));
+
+        const mergedList = Array.from(mergedMap.values());
+        const sorted = mergedList.sort((a, b) => (a.id === 'default_agent' ? -1 : b.id === 'default_agent' ? 1 : 0));
+
+        setAllAgents(sorted);
+        saveLocalData('all_agents', sorted);
+        setFirebaseError(null);
       }, (err) => {
         console.warn("Firestore all_agents listen blocked:", err);
+        setFirebaseError(err instanceof Error ? err.message : String(err));
       });
 
     } catch (e) {
@@ -411,11 +520,13 @@ export default function App() {
   // Sync state modifications safely across both channels
   const updateFirebaseDoc = async (col: string, docId: string, data: any) => {
     try {
-      if (isFirebaseSynced && db) {
+      if (db) {
         await setDoc(doc(db, col, docId), data);
+        setFirebaseError(null);
       }
     } catch (e) {
       console.warn(`Cloud save failed for ${col}/${docId}. Offline mirror utilized.`, e);
+      setFirebaseError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -450,6 +561,36 @@ export default function App() {
   const handleResolvePlayerRequest = (id: string, status: 'approved' | 'rejected') => {
     const request = playerRequests.find(r => r.id === id);
     if (!request) return;
+
+    if (status === 'approved') {
+      const approvedWalletDeposits = balanceRequests
+        .filter(r => r.status === 'approved' && (r.agentId === agent.id || (!r.agentId && agent.id === 'default_agent')))
+        .reduce((sum, r) => sum + r.amount, 0);
+
+      const totalAgentDeposit = approvedWalletDeposits || (agent.id === 'default_agent' ? 145000 : (agent.id === 'imran_agent' ? 35000 : 30000));
+
+      if (request.type === 'deposit') {
+        const totalApprovedPlayerDeposits = transactions
+          .filter(t => t.type === 'deposit' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const remainingDepositLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerDeposits);
+        if (request.amount > remainingDepositLimit) {
+          alert('⚠️ দুঃখিত! আপনার এই অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত ডিপোজিট লিমিট নেই।');
+          return;
+        }
+      } else {
+        const totalApprovedPlayerWithdraws = transactions
+          .filter(t => t.type === 'withdraw' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const remainingWithdrawLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerWithdraws);
+        if (request.amount > remainingWithdrawLimit) {
+          alert('⚠️ দুঃখিত! আপনার এই অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত উইথড্র লিমিট নেই।');
+          return;
+        }
+      }
+    }
 
     // Update active player request status
     const updatedRequests = playerRequests.map(r => r.id === id ? { ...r, status } : r);
@@ -752,76 +893,108 @@ export default function App() {
   };
 
   // 5. Admin Simulator Actions (Approve / Reject)
-  const handleApproveRequest = (id: string) => {
-    const updatedReqs = balanceRequests.map((r) => {
-      if (r.id === id) {
-        // Find target agent ID and update their specific balance in Firestore
-        const targetAgentId = r.agentId || agent.id || 'default_agent';
-        const targetAgent = allAgents.find(a => a.id === targetAgentId) || agent;
-        
-        const nextAgent: Agent = {
-          ...targetAgent,
-          balance: targetAgent.balance + r.amount
-        };
-        
-        // Save target agent to Firestore vs local state
-        if (targetAgentId === agent.id) {
-          updateAgentState(nextAgent);
-        } else {
-          updateFirebaseDoc('agents', targetAgentId, nextAgent);
-        }
-
-        // Push alert
-        const newNotif: NotificationItem = {
-          id: "N-" + Date.now(),
-          title: "ব্যালেন্স রিকোয়েস্ট অনুমোদিত!",
-          body: `অভিনন্দন! আপনার ৳${r.amount.toLocaleString('bn-BD')} টাকার ব্যালেন্স রিচার্জ রিকোয়েস্ট (ID: ${r.id}) অ্যাডমিন গেটওয়ে দ্বারা অনুমোদিত ও ওয়ালেটে ক্যাশপিন নিশ্চিত করা হয়েছে।`,
-          timestamp: Date.now(),
-          read: false,
-          type: 'balance'
-        };
-        appendNotification(newNotif);
-
-        return { ...r, status: 'approved' as const };
-      }
-      return r;
-    });
-
-    setBalanceRequests(updatedReqs);
-    saveLocalData('balance_requests', updatedReqs);
-    
-    // Save to Cloud
-    const approvedTarget = updatedReqs.find(r => r.id === id);
-    if (approvedTarget) {
-      updateFirebaseDoc('balance_requests', id, approvedTarget);
+  const handleApproveRequest = (id: string, fallbackReq?: BalanceRequest) => {
+    let targetReq = balanceRequests.find((r) => r.id === id);
+    if (!targetReq && fallbackReq) {
+      targetReq = fallbackReq;
     }
+
+    if (!targetReq) return;
+
+    // Find target agent ID and update their specific balance in Firestore
+    const targetAgentId = targetReq.agentId || agent.id || 'default_agent';
+    let targetAgent = allAgents.find(a => a.id === targetAgentId);
+    
+    if (!targetAgent) {
+      if (targetAgentId === agent.id) {
+        targetAgent = agent;
+      } else {
+        targetAgent = {
+          id: targetAgentId,
+          name: 'এজেন্ট (' + targetAgentId + ')',
+          phone: '01700000000',
+          balance: 0,
+          commissionBalance: 0,
+          todayDeposit: 0,
+          todayWithdraw: 0,
+          limits: { minDeposit: 100, maxDeposit: 25000, minWithdraw: 100, maxWithdraw: 25000 }
+        };
+      }
+    }
+    
+    const nextAgent: Agent = {
+      ...targetAgent,
+      balance: (targetAgent.balance || 0) + targetReq.amount
+    };
+    
+    // Save target agent to Firestore vs local state
+    if (targetAgentId === agent.id) {
+      updateAgentState(nextAgent);
+    } else {
+      setAllAgents(prev => prev.map(a => a.id === targetAgentId ? nextAgent : a));
+      updateFirebaseDoc('agents', targetAgentId, nextAgent);
+    }
+
+    // Push alert
+    const newNotif: NotificationItem = {
+      id: "N-" + Date.now(),
+      title: "ব্যালেন্স রিকোয়েস্ট অনুমোদিত!",
+      body: `অভিনন্দন! আপনার ৳${targetReq.amount.toLocaleString('bn-BD')} টাকার ব্যালেন্স রিচার্জ রিকোয়েস্ট (ID: ${targetReq.id}) অ্যাডমিন গেটওয়ে দ্বারা অনুমোদিত ও ওয়ালেটে ক্যাশপিন নিশ্চিত করা হয়েছে।`,
+      timestamp: Date.now(),
+      read: false,
+      type: 'balance'
+    };
+    appendNotification(newNotif);
+
+    // Update request status
+    const approvedRequest: BalanceRequest = { ...targetReq, status: 'approved' as const };
+
+    if (balanceRequests.some(r => r.id === id)) {
+      const updatedReqs = balanceRequests.map((r) => r.id === id ? approvedRequest : r);
+      setBalanceRequests(updatedReqs);
+      saveLocalData('balance_requests', updatedReqs);
+    } else {
+      const updatedReqs = [approvedRequest, ...balanceRequests];
+      setBalanceRequests(updatedReqs);
+      saveLocalData('balance_requests', updatedReqs);
+    }
+
+    // Save to Cloud
+    updateFirebaseDoc('balance_requests', id, approvedRequest);
   };
 
-  const handleRejectRequest = (id: string) => {
-    const updatedReqs = balanceRequests.map((r) => {
-      if (r.id === id) {
-        const newNotif: NotificationItem = {
-          id: "N-" + Date.now(),
-          title: "ব্যালেন্স রিকোয়েস্ট বাতিল করা হয়েছে",
-          body: `আপনার প্রেরিত ৳${r.amount.toLocaleString('bn-BD')} টাকা রিকোয়েস্ট (TxID: ${r.txid}) বাতিল হয়েছে। অনুগ্রহ করে হেল্পডেস্কে যোগাযোগ করুন।`,
-          timestamp: Date.now(),
-          read: false,
-          type: 'general'
-        };
-        appendNotification(newNotif);
-
-        return { ...r, status: 'rejected' as const };
-      }
-      return r;
-    });
-
-    setBalanceRequests(updatedReqs);
-    saveLocalData('balance_requests', updatedReqs);
-    
-    const rejectedTarget = updatedReqs.find(r => r.id === id);
-    if (rejectedTarget) {
-      updateFirebaseDoc('balance_requests', id, rejectedTarget);
+  const handleRejectRequest = (id: string, fallbackReq?: BalanceRequest) => {
+    let targetReq = balanceRequests.find((r) => r.id === id);
+    if (!targetReq && fallbackReq) {
+      targetReq = fallbackReq;
     }
+
+    if (!targetReq) return;
+
+    const newNotif: NotificationItem = {
+      id: "N-" + Date.now(),
+      title: "ব্যালেন্স রিকোয়েস্ট বাতিল করা হয়েছে",
+      body: `আপনার প্রেরিত ৳${targetReq.amount.toLocaleString('bn-BD')} টাকা রিকোয়েস্ট (TxID: ${targetReq.txid}) বাতিল হয়েছে। অনুগ্রহ করে হেল্পডেস্কে যোগাযোগ করুন।`,
+      timestamp: Date.now(),
+      read: false,
+      type: 'general'
+    };
+    appendNotification(newNotif);
+
+    const rejectedRequest: BalanceRequest = { ...targetReq, status: 'rejected' as const };
+
+    if (balanceRequests.some(r => r.id === id)) {
+      const updatedReqs = balanceRequests.map((r) => r.id === id ? rejectedRequest : r);
+      setBalanceRequests(updatedReqs);
+      saveLocalData('balance_requests', updatedReqs);
+    } else {
+      const updatedReqs = [rejectedRequest, ...balanceRequests];
+      setBalanceRequests(updatedReqs);
+      saveLocalData('balance_requests', updatedReqs);
+    }
+
+    // Save to Cloud
+    updateFirebaseDoc('balance_requests', id, rejectedRequest);
   };
 
   const handleUpdateAgentLimits = async (agentId: string, limits: any) => {
@@ -868,7 +1041,7 @@ export default function App() {
     const updated = notifications.map(n => ({ ...n, read: true }));
     setNotifications(updated);
     saveLocalData('notifications', updated);
-    if (isFirebaseSynced && db) {
+    if (db) {
       updated.forEach((n) => {
         updateFirebaseDoc('notifications', n.id, n);
       });
@@ -892,6 +1065,12 @@ export default function App() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const pendingRequests = balanceRequests.filter(r => r.status === 'pending');
+
+  const approvedWalletDeposits = balanceRequests
+    .filter(r => r.status === 'approved' && (r.agentId === agent.id || (!r.agentId && agent.id === 'default_agent')))
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const totalAgentDeposit = approvedWalletDeposits || (agent.id === 'default_agent' ? 145000 : (agent.id === 'imran_agent' ? 35000 : 30000));
 
   // AGENT SIMULATED SECURE ACCESS GATEWAY
   const handleProfileSelect = (agentId: string) => {
@@ -1100,16 +1279,35 @@ export default function App() {
               /* ADMIN LOGGED IN: VIEW SPECIFIC BALANCE DEPOSIT DETAILS */
               <div className="flex flex-col gap-4">
                 {(() => {
-                  const req = balanceRequests.find(r => r.id === adminRequestId) || {
-                    id: adminRequestId,
-                    amount: 50000,
-                    method: 'bKash' as const,
-                    senderNumber: '01812762441',
-                    txid: 'TX89182390A',
-                    status: 'pending' as const,
-                    timestamp: Date.now() - 60000 * 5,
-                    agentId: agent.id || 'default_agent'
-                  };
+                  const req = loadedAdminRequest || balanceRequests.find(r => r.id.trim() === adminRequestId.trim());
+
+                  if (isAdminRequestLoading && !req) {
+                    return (
+                      <div className="flex flex-col items-center justify-center p-8 gap-3">
+                        <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-800 animate-spin" />
+                        <span className="text-xs text-slate-500 font-medium">অনুরোধের তথ্য লোড হচ্ছে...</span>
+                      </div>
+                    );
+                  }
+
+                  if (!req) {
+                    return (
+                      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-center text-xs flex flex-col gap-2">
+                        <span className="font-bold text-[13px]">⚠️ অনুরোধটি পাওয়া যায়নি!</span>
+                        <span>ডাটাবেসে এই আইডি সম্বলিত কোনো ডিপোজিট অনুরোধের হদিস মেলেনি। অনুগ্রহ করে সঠিক লিংক ব্যবহার করুন।</span>
+                        {adminFetchError && (
+                          <div className="mt-2 text-[11px] p-2 bg-rose-100/50 rounded text-rose-800 text-left font-mono break-all leading-normal">
+                            <strong>ত্রুটি বিবরণ:</strong> {adminFetchError}
+                          </div>
+                        )}
+                        {firebaseError && (
+                          <div className="mt-1 text-[11px] p-2 bg-yellow-50 rounded text-yellow-800 text-left font-mono break-all leading-normal">
+                            <strong>ফায়ারবেস স্থিতি:</strong> {firebaseError}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
 
                   const isRequestPending = req.status === 'pending';
 
@@ -1181,14 +1379,14 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-3 mt-1">
                           <button
                             type="button"
-                            onClick={() => handleRejectRequest(req.id)}
+                            onClick={() => handleRejectRequest(req.id, req)}
                             className="py-2.5 font-bold text-xs text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-250 transition cursor-pointer outline-none"
                           >
                             অনুরোধ বাতিল করুন
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleApproveRequest(req.id)}
+                            onClick={() => handleApproveRequest(req.id, req)}
                             className="py-2.5 font-bold text-xs text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl border border-emerald-250 transition cursor-pointer shadow-xs outline-none"
                           >
                             অনুরোধ এপ্রুভ করুন
@@ -1444,6 +1642,7 @@ export default function App() {
                 onRefreshData={handleRefreshData}
                 onOpenProfile={() => setActiveModal('profile')}
                 onLogout={handleLogout}
+                totalAgentDeposit={totalAgentDeposit}
               />
 
               {/* Quick Shortcuts Menu */}

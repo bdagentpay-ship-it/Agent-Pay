@@ -29,6 +29,7 @@ interface HeaderProps {
   onRefreshData: () => void;
   onOpenProfile: () => void;
   onLogout: () => void;
+  totalAgentDeposit?: number;
 }
 
 export default function Header({ 
@@ -38,7 +39,8 @@ export default function Header({
   isFirebaseSynced, 
   onRefreshData,
   onOpenProfile,
-  onLogout
+  onLogout,
+  totalAgentDeposit = 0,
 }: HeaderProps) {
   const [showBalance, setShowBalance] = useState(false);
   const [showCommission, setShowCommission] = useState(false);
@@ -234,8 +236,9 @@ export default function Header({
               <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
               আজকের ডিপোজিট (Dep)
             </span>
-            <span className="text-base font-bold text-slate-800 flex items-baseline gap-0.5 mt-0.5">
-              ৳ {formatCurrency(agent.todayDeposit)}
+            <span className="text-base font-bold text-slate-800 flex items-baseline gap-1 mt-0.5 flex-wrap">
+              <span>৳ {formatCurrency(agent.todayDeposit)}</span>
+              <span className="text-[10px] text-slate-400 font-normal">/ ৳{formatCurrency(totalAgentDeposit)}</span>
             </span>
           </div>
 
@@ -244,8 +247,9 @@ export default function Header({
               <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
               আজকের উইথড্র (With)
             </span>
-            <span className="text-base font-bold text-slate-800 flex items-baseline gap-0.5 mt-0.5">
-              ৳ {formatCurrency(agent.todayWithdraw)}
+            <span className="text-base font-bold text-slate-800 flex items-baseline gap-1 mt-0.5 flex-wrap">
+              <span>৳ {formatCurrency(agent.todayWithdraw)}</span>
+              <span className="text-[10px] text-slate-400 font-normal">/ ৳{formatCurrency(totalAgentDeposit)}</span>
             </span>
           </div>
         </div>

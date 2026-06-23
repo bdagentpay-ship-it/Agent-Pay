@@ -141,6 +141,22 @@ export default function Modals({
     return toBanglaNum(num.toLocaleString('bn-BD'));
   };
 
+  // Real limits and quotas based on agent deposits (system recharges)
+  const totalAgentDeposit = balanceRequests
+    .filter(r => r.status === 'approved' && (r.agentId === agent.id || (!r.agentId && agent.id === 'default_agent')))
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const totalApprovedPlayerDeposits = transactions
+    .filter(t => t.type === 'deposit' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalApprovedPlayerWithdraws = transactions
+    .filter(t => t.type === 'withdraw' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const remainingDepositLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerDeposits);
+  const remainingWithdrawLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerWithdraws);
+
   // State for forms
   const [method, setMethod] = useState<'bKash' | 'Nagad' | 'Rocket' | 'Upay'>('bKash');
   const [playerId, setPlayerId] = useState('');
@@ -533,6 +549,29 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                   </div>
                 </div>
 
+                {/* Deposit Quota limit diagnostics screen */}
+                <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex flex-col gap-1 text-[11px]">
+                  <span className="font-bold text-amber-900">🔔 ডিপোজিট-ভিত্তিক এপ্রুভাল সীমা পর্যবেক্ষণঃ</span>
+                  <div className="flex justify-between mt-1 text-slate-600">
+                    <span>মোট এডমিন ডিপোজিট (জমা):</span>
+                    <span className="font-bold">৳{totalAgentDeposit.toLocaleString('bn-BD')}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>এপর্যন্ত সফল ডিপোজিট এপ্রুভালঃ</span>
+                    <span className="font-bold text-blue-600">৳{totalApprovedPlayerDeposits.toLocaleString('bn-BD')}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-amber-200/50 pt-1 font-semibold text-slate-800">
+                    <span>অবशिष्ट ডিপোজিট এপ্রুভাল সীমাঃ</span>
+                    <span className={`${remainingDepositLimit > 0 ? 'text-emerald-700' : 'text-slate-500'} font-bold`}>৳{remainingDepositLimit.toLocaleString('bn-BD')} টাকা</span>
+                  </div>
+                </div>
+
+                {selectedPlayerReq.amount > remainingDepositLimit && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl leading-relaxed font-medium">
+                    ⚠️ <strong>অনুমোদন ব্লক করা হয়েছে:</strong> আপনার অবশিষ্ট ডিপোজিটের এপ্রুভাল সীমা পর্যাপ্ত নয়। এপ্রুভাল সীমা বাড়ানোর জন্য দয়া করে অ্যাডমিন ড্যাশবোর্ডে নতুন রিচার্জ (জমা) অনুরোধ পাঠিয়ে এপ্রুভ করিয়ে নিন।
+                  </div>
+                )}
+
                 <div className="bg-blue-50 border border-blue-150 rounded-xl p-3 text-[10.5px] leading-relaxed text-blue-800">
                   ℹ️ নিশ্চিত হওয়ার পর <strong>এপ্রুভ করুন</strong> বাটনে চাপ দিন। আপনার লেজার ব্যালেন্স থেকে ৳{selectedPlayerReq.amount.toLocaleString('bn-BD')} টাকা বিয়োগ হবে এবং ২ সেকেন্ডে ৩.০% কমিশন লেজারে ক্রেডিট হয়ে যাবে।
                 </div>
@@ -550,6 +589,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                   </button>
                   <button
                     type="button"
+                    disabled={selectedPlayerReq.amount > remainingDepositLimit}
                     onClick={() => {
                       if (agent.balance < selectedPlayerReq.amount) {
                         setErrorMsg('আপনার মেইন ব্যালেন্স অপর্যাপ্ত! অনুগ্রহ করে আগে অ্যাডমিন গেটওয়েতে রিচার্জ করুন।');
@@ -558,7 +598,11 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                       onResolvePlayerRequest(selectedPlayerReq.id, 'approved');
                       setResolvedReceipt({ req: selectedPlayerReq, status: 'approved', timestamp: Date.now() });
                     }}
-                    className="py-2.5 rounded-xl bg-blue-700 text-white font-bold shadow-xs hover:bg-blue-800 cursor-pointer"
+                    className={`py-2.5 rounded-xl text-white font-bold shadow-xs transition leading-normal ${
+                      selectedPlayerReq.amount > remainingDepositLimit 
+                        ? 'bg-slate-350 cursor-not-allowed opacity-50' 
+                        : 'bg-blue-700 hover:bg-blue-800 cursor-pointer'
+                    }`}
                   >
                     এপ্রুভ করুন (৳{selectedPlayerReq.amount.toLocaleString('bn-BD')})
                   </button>
@@ -667,44 +711,35 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
               /* 2.2 VIEW SINGLE WITHDRAW REQUEST DETAILS & QUOTA LIMITS */
               <div className="flex flex-col gap-4 font-sans text-xs">
                 {(() => {
-                  const approvedDepositsToday = transactions
-                    .filter(t => t.type === 'deposit' && t.status === 'completed' && new Date(t.timestamp).toDateString() === new Date().toDateString())
-                    .reduce((acc, t) => acc + t.amount, 0);
-
-                  const approvedWithdrawsToday = transactions
-                    .filter(t => t.type === 'withdraw' && t.status === 'completed' && new Date(t.timestamp).toDateString() === new Date().toDateString())
-                    .reduce((acc, t) => acc + t.amount, 0);
-
-                  const withdrawQuotaLeft = Math.max(0, approvedDepositsToday - approvedWithdrawsToday);
-                  const isQuotaInsufficient = selectedPlayerReq.amount > withdrawQuotaLeft;
+                  const isQuotaInsufficient = selectedPlayerReq.amount > remainingWithdrawLimit;
 
                   return (
                     <>
                       <div className="flex items-center justify-between border-b pb-2 border-slate-150">
                         <button
-                          type="button"
-                          onClick={() => { setErrorMsg(''); setSelectedPlayerReq(null); }}
-                          className="text-rose-700 hover:text-rose-800 font-bold"
+                           type="button"
+                           onClick={() => { setErrorMsg(''); setSelectedPlayerReq(null); }}
+                           className="text-rose-700 hover:text-rose-800 font-bold"
                         >
-                          ← ফিরে যান
+                           ← ফিরে যান
                         </button>
                         <span className="font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold">{selectedPlayerReq.id}</span>
                       </div>
-
+ 
                       {/* Quota limit diagnostics screen */}
                       <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex flex-col gap-1 text-[11px]">
-                        <span className="font-bold text-amber-900">🔔 দৈনিক উইথড্র অতিরিক্ত সীমা পর্যবেক্ষণঃ</span>
+                        <span className="font-bold text-amber-900">🔔 ডিপোজিট-ভিত্তিক উইথড্র সীমা পর্যবেক্ষণঃ</span>
                         <div className="flex justify-between mt-1 text-slate-600">
-                          <span>আজকের মোট ডিপোজিটঃ</span>
-                          <span className="font-bold">৳{approvedDepositsToday.toLocaleString('bn-BD')}</span>
+                          <span>মোট এডমিন ডিপোজিট (জমা):</span>
+                          <span className="font-bold">৳{totalAgentDeposit.toLocaleString('bn-BD')}</span>
                         </div>
                         <div className="flex justify-between text-slate-600">
-                          <span>আজকের মোট সফল উইথড্রঃ</span>
-                          <span className="font-bold text-rose-600">৳{approvedWithdrawsToday.toLocaleString('bn-BD')}</span>
+                          <span>এপর্যন্ত সফল উইথড্র এপ্রুভালঃ</span>
+                          <span className="font-bold text-rose-600">৳{totalApprovedPlayerWithdraws.toLocaleString('bn-BD')}</span>
                         </div>
                         <div className="flex justify-between border-t border-amber-200/50 pt-1 font-semibold text-slate-800">
-                          <span>অবশিষ্ট অতিরিক্ত সীমাঃ</span>
-                          <span className={`${withdrawQuotaLeft > 0 ? 'text-emerald-700' : 'text-slate-500'} font-bold`}>৳{withdrawQuotaLeft.toLocaleString('bn-BD')} টাকা</span>
+                          <span>অবশিষ্ট উইথড্র এপ্রুভাল সীমাঃ</span>
+                          <span className={`${remainingWithdrawLimit > 0 ? 'text-emerald-700' : 'text-slate-500'} font-bold`}>৳{remainingWithdrawLimit.toLocaleString('bn-BD')} টাকা</span>
                         </div>
                       </div>
 
@@ -742,7 +777,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
 
                       {isQuotaInsufficient && (
                         <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl leading-relaxed font-medium">
-                          ⚠️ <strong>অনুমোদন ব্লক করা হয়েছে:</strong> আপনার আজকের মোট জমা করা ডিপোজিটের চেয়ে অতিরিক্ত উইথড্র সীমা অপর্যাপ্ত। অতিরিক্ত উইথড্র করার পূর্বে দয়া করে নতুন প্লেয়ার ডিপোজিট অনুরোধ অ্যাপ্রুভ করুন যাতে কোটা বৃদ্ধি পায়।
+                          ⚠️ <strong>অনুমোদন ব্লক করা হয়েছে:</strong> আপনার অবশিষ্ট উইথড্রাল অনুমোদন সীমা অপর্যাপ্ত। অতিরিক্ত উইথড্র সীমা বাড়ানোর জন্য দয়া করে অ্যাডমিন ড্যাশবোর্ডে নতুন রিচার্জ (জমা) অনুরোধ পাঠিয়ে এপ্রুভ করিয়ে নিন।
                         </div>
                       )}
 
@@ -906,10 +941,14 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                 <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">টাকা পাঠানোর আমাদের পেমেন্ট নাম্বারসমূহঃ</span>
                 
                 <div className="flex flex-col gap-2">
-                  {[
-                    { label: 'বিকাশ পার্সোনাল', num: '01812-762441' },
-                    { label: 'বিকাশ পার্সোনাল', num: '01812-762441' }
-                  ].map((p, idx) => (
+                  {(reqMethod === 'bKash'
+                    ? [{ label: 'বিকাশ পার্সোনাল', num: '01701-976286' }]
+                    : reqMethod === 'Nagad'
+                    ? [{ label: 'নগদ পার্সোনাল', num: '01701-976286' }]
+                    : reqMethod === 'Rocket'
+                    ? [{ label: 'রকেট পার্সোনাল', num: '01701-976286' }]
+                    : [{ label: 'বিকাশ/নগদ পেমেন্ট গেটওয়ে', num: '01701-976286' }]
+                  ).map((p, idx) => (
                     <div key={idx} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg">
                       <div className="flex flex-col">
                         <span className="text-[9.5px] font-bold text-rose-500 uppercase">{p.label}</span>

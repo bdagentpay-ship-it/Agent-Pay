@@ -32,6 +32,30 @@ export const DEFAULT_AGENT: Agent = {
   referralCode: "AGPAY789"
 };
 
+export const IMRAN_AGENT: Agent = {
+  id: "imran_agent",
+  name: "ইমরান হোসেন (এজেন্ট)",
+  phone: "01711223344",
+  email: "imran@gmail.com",
+  password: "1234",
+  dob: "1995-05-15",
+  balance: 35000,
+  commissionBalance: 450,
+  todayDeposit: 0,
+  todayWithdraw: 0,
+  referralsCount: 2,
+  referralEarnings: 200,
+  referralCode: "AGPAY112",
+  limits: {
+    dailyDeposit: 50000,
+    weeklyDeposit: 250000,
+    monthlyDeposit: 1000000,
+    dailyWithdraw: 50000,
+    weeklyWithdraw: 250000,
+    monthlyWithdraw: 1000000
+  }
+};
+
 export const INITIAL_TRANSACTIONS: Transaction[] = [
   {
     id: "TX-1001",
