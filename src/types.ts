@@ -76,6 +76,10 @@ export interface Agent {
   referralEarnings: number;
   referralCode: string;
   limits?: AgentLimits;
+  referredByAgentId?: string;
+  hasDeposited?: boolean;
+  referralBonusEarned?: number;
+  registrationDate?: string;
 }
 
 export interface PlayerRequest {

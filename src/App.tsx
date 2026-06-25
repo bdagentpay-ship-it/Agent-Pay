@@ -987,22 +987,97 @@ export default function App() {
           commissionBalance: 0,
           todayDeposit: 0,
           todayWithdraw: 0,
+          referralsCount: 0,
+          referralEarnings: 0,
+          referralCode: "AGPAY" + Math.floor(10000 + Math.random() * 90000),
           limits: { minDeposit: 100, maxDeposit: 25000, minWithdraw: 100, maxWithdraw: 25000 }
-        };
+        } as any;
       }
     }
     
+    let updatedReferrer: Agent | undefined = undefined;
+    let bonusAmount = 0;
+    
+    // Referral rewards: if targetAgent hasn't made a deposit before and has a referrer
+    if (targetAgent.referredByAgentId && !targetAgent.hasDeposited) {
+      const refId = targetAgent.referredByAgentId;
+      const refAgent = allAgents.find(a => a.id === refId) || (refId === agent.id ? agent : undefined);
+      if (refAgent) {
+        // Generate a random bonus between 300 and 500 Taka (rounded to nearest 10)
+        bonusAmount = Math.floor((Math.random() * 201 + 300) / 10) * 10;
+        updatedReferrer = {
+          ...refAgent,
+          referralEarnings: (refAgent.referralEarnings || 0) + bonusAmount,
+          commissionBalance: (refAgent.commissionBalance || 0) + bonusAmount
+        };
+      }
+    }
+
     const nextAgent: Agent = {
       ...targetAgent,
-      balance: (targetAgent.balance || 0) + targetReq.amount
+      balance: (targetAgent.balance || 0) + targetReq.amount,
+      hasDeposited: true
     };
     
     // Save target agent to Firestore vs local state
     if (targetAgentId === agent.id) {
-      updateAgentState(nextAgent);
+      // If we are also updating referrer, and referrer is the same logged-in agent, merge them
+      if (updatedReferrer && updatedReferrer.id === agent.id) {
+        const merged: Agent = {
+          ...nextAgent,
+          referralEarnings: (nextAgent.referralEarnings || 0) + bonusAmount,
+          commissionBalance: (nextAgent.commissionBalance || 0) + bonusAmount
+        };
+        updateAgentState(merged);
+        updatedReferrer = undefined; // marked as already updated
+      } else {
+        updateAgentState(nextAgent);
+      }
     } else {
       setAllAgents(prev => prev.map(a => a.id === targetAgentId ? nextAgent : a));
       updateFirebaseDoc('agents', targetAgentId, nextAgent);
+    }
+
+    // Save referrer agent to Firestore vs local state if updated
+    if (updatedReferrer) {
+      if (updatedReferrer.id === agent.id) {
+        updateAgentState(updatedReferrer);
+      } else {
+        setAllAgents(prev => prev.map(a => a.id === updatedReferrer!.id ? updatedReferrer! : a));
+        updateFirebaseDoc('agents', updatedReferrer.id, updatedReferrer);
+      }
+
+      // Record commission transaction log for the referrer
+      const refTrans: Transaction = {
+        id: "REF-BONUS-" + Date.now(),
+        type: 'deposit' as any,
+        playerId: targetAgentId,
+        playerName: `রেফারেল বোনাস (${targetAgent.name || targetAgentId})`,
+        amount: bonusAmount,
+        comPercent: 0,
+        comAmount: bonusAmount,
+        method: 'bKash',
+        timestamp: Date.now(),
+        status: 'completed',
+        agentId: updatedReferrer.id
+      };
+      updateFirebaseDoc('transactions', refTrans.id, refTrans);
+
+      // Create dynamic notification for referrer
+      const bonusNotif: NotificationItem = {
+        id: "N-BONUS-" + Date.now(),
+        title: "রেফারেল বোনাস সফল!",
+        body: `অভিনন্দন! আপনার আমন্ত্রিত নতুন এজেন্ট ${targetAgent.name || targetAgentId} তাদের প্রথম জমা (৳${targetReq.amount.toLocaleString('bn-BD')}) নিশ্চিত করেছেন। আপনি ৳${bonusAmount.toLocaleString('bn-BD')} রেফারেল বোনাস পেয়েছেন যা আপনার কমিশন ওয়ালেটে যুক্ত করা হয়েছে।`,
+        timestamp: Date.now(),
+        read: false,
+        type: 'commission'
+      };
+      
+      if (updatedReferrer.id === agent.id) {
+        appendNotification(bonusNotif);
+      } else {
+        updateFirebaseDoc('notifications', bonusNotif.id, bonusNotif);
+      }
     }
 
     // Push alert
@@ -1238,6 +1313,37 @@ export default function App() {
       monthlyWithdraw: 1000000,
     };
 
+    // Helper to get Bengali date
+    const getBengaliDate = () => {
+      const months = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+      const date = new Date();
+      const day = date.getDate();
+      const month = months[date.getMonth()];
+      const year = date.getFullYear();
+      
+      const toBanglaNum = (n: number | string) => {
+        const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+        return n.toString().split('').map(char => banglaDigits[parseInt(char)] || char).join('');
+      };
+      
+      return `${toBanglaNum(day)} ${month} ${toBanglaNum(year)}`;
+    };
+
+    let referredByAgentId: string | undefined = undefined;
+    let referrerAgent: Agent | undefined = undefined;
+
+    if (agentReferralInput) {
+      const cleanInput = agentReferralInput.trim();
+      const referrer = allAgents.find(a => a.referralCode === cleanInput);
+      if (referrer) {
+        referredByAgentId = referrer.id;
+        referrerAgent = {
+          ...referrer,
+          referralsCount: (referrer.referralsCount || 0) + 1
+        };
+      }
+    }
+
     const customAgent: Agent = {
       id: customId,
       name: agentNameInput,
@@ -1249,17 +1355,36 @@ export default function App() {
       commissionBalance: 0,
       todayDeposit: 0,
       todayWithdraw: 0,
-      referralsCount: agentReferralInput ? 1 : 0,
-      referralEarnings: agentReferralInput ? 100 : 0,
+      referralsCount: 0,
+      referralEarnings: 0,
       referralCode: "AGPAY" + randNum,
-      limits: defaultLimits
+      limits: defaultLimits,
+      referredByAgentId,
+      hasDeposited: false,
+      registrationDate: getBengaliDate()
     };
 
     setAgent(customAgent);
     setSelectedAgentId(customId);
     
-    // Add to allAgents list
-    const updatedList = [customAgent, ...allAgents.filter(a => a.id !== customId)];
+    // Add to allAgents list & update referrer agent if present
+    let updatedList = [customAgent, ...allAgents.filter(a => a.id !== customId)];
+    if (referrerAgent) {
+      updatedList = updatedList.map(a => a.id === referrerAgent!.id ? referrerAgent! : a);
+      updateFirebaseDoc('agents', referrerAgent.id, referrerAgent);
+
+      // Create a notification for the referrer
+      const refNotif: NotificationItem = {
+        id: "N-REF-" + Date.now(),
+        title: "নতুন সাব-এজেন্ট যুক্ত হয়েছে!",
+        body: `অভিনন্দন! আপনার রেফারেল কোড ব্যবহার করে নতুন একজন এজেন্ট (${customAgent.name}) সফলভাবে নিবন্ধন করেছেন। তিনি প্রথম ডিপোজিট রিচার্জ সম্পন্ন করলেই আপনি ৩০০-৫০০ টাকা বোনাস পাবেন!`,
+        timestamp: Date.now(),
+        read: false,
+        type: 'general'
+      };
+      updateFirebaseDoc('notifications', refNotif.id, refNotif);
+    }
+    
     setAllAgents(updatedList);
     saveLocalData('all_agents', updatedList);
     saveLocalData('agent', customAgent);
@@ -1797,6 +1922,7 @@ export default function App() {
             onTriggerPlayerRequest={triggerNewRandomPlayerRequest}
             onUpdateProfile={handleUpdateProfile}
             onDeleteTransaction={deleteTransaction}
+            allAgents={allAgents}
           />
         )}
       </AnimatePresence>

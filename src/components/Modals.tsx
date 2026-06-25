@@ -55,6 +55,7 @@ interface ModalProps {
   onTriggerPlayerRequest?: (manualType?: 'deposit' | 'withdraw') => void;
   onUpdateProfile?: (updatedFields: Partial<Agent>) => void;
   onDeleteTransaction?: (txId: string) => void;
+  allAgents?: Agent[];
 }
 
 interface ModalContainerProps {
@@ -123,7 +124,8 @@ export default function Modals({
   timeLeft = 60,
   onTriggerPlayerRequest = () => {},
   onUpdateProfile = () => {},
-  onDeleteTransaction = () => {}
+  onDeleteTransaction = () => {},
+  allAgents = []
 }: ModalProps) {
 
   // Translate english numbers to Bengali
@@ -1636,20 +1638,46 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
 
             <div className="flex flex-col gap-2 font-sans overflow-hidden">
               <h5 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-150 pb-1 font-sans">আমন্ত্রিত সাব-এজেন্ট সমূহ</h5>
-              <div className="flex flex-col gap-2 max-h-36 overflow-y-auto no-scrollbar">
-                {[
-                  { id: "AG204", date: "১৫ জুন ২০২৬", earned: 650 },
-                  { id: "AG401", date: "১০ জুন ২০২৬", earned: 1200 },
-                  { id: "AG582", date: "০২ জুন ২০২৬", earned: 950 },
-                ].map((ref, idx) => (
-                  <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-3xs">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-bold text-slate-800">এজেন্ট {ref.id}</span>
-                      <span className="text-[9px] text-slate-400 font-mono">নিবন্ধনঃ {ref.date}</span>
-                    </div>
-                    <span className="text-[11px] font-bold text-emerald-700">+ ৳ {formatCurrency(ref.earned)}</span>
-                  </div>
-                ))}
+              <div className="flex flex-col gap-2 max-h-48 overflow-y-auto no-scrollbar">
+                {(() => {
+                  const myReferrals = allAgents.filter(a => a.referredByAgentId === agent.id);
+                  if (myReferrals.length > 0) {
+                    return myReferrals.map((ref, idx) => {
+                      const earnedAmount = transactions
+                        .filter(t => t.agentId === agent.id && t.playerId === ref.id && t.id.startsWith("REF-BONUS-"))
+                        .reduce((sum, t) => sum + (t.comAmount || 0), 0);
+                        
+                      return (
+                        <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs shadow-3xs hover:border-purple-200 transition">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-slate-800">{ref.name} ({ref.id})</span>
+                            <span className="text-[9px] text-slate-400 font-mono">নিবন্ধনঃ {ref.registrationDate || 'সদ্য নিবন্ধিত'}</span>
+                          </div>
+                          <div className="text-right flex flex-col items-end">
+                            <span className="text-[11px] font-bold text-emerald-700">
+                              + ৳ {formatCurrency(earnedAmount)}
+                            </span>
+                            {!ref.hasDeposited && (
+                              <span className="text-[8px] font-bold text-amber-600 bg-amber-50 px-1 py-0.5 rounded-sm mt-0.5 animate-pulse">
+                                জমা বকেয়া (Pending)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  } else {
+                    return (
+                      <div className="py-6 px-3 bg-slate-50/50 border border-dashed border-slate-200 rounded-xl text-center flex flex-col items-center justify-center gap-1.5">
+                        <Users className="w-6 h-6 text-slate-350 animate-pulse" />
+                        <span className="text-[10.5px] font-bold text-slate-650">কোনো সাব-এজেন্ট এখনো যুক্ত হয়নি</span>
+                        <p className="text-[9.5px] text-slate-450 max-w-[240px] leading-normal mx-auto font-sans">
+                          আপনার ইউনিক রেফারেল কোডটি ব্যবহার করে অন্য এজেন্টদের আমন্ত্রণ জানান এবং তারা প্রথম রিচার্জ করার সাথে সাথে ৩০০-৫০০ টাকা বোনাস পান!
+                        </p>
+                      </div>
+                    );
+                  }
+                })()}
               </div>
             </div>
           </div>
