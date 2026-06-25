@@ -583,24 +583,31 @@ export default function App() {
 
       const totalAgentDeposit = approvedWalletDeposits || (agent.id === 'default_agent' ? 145000 : (agent.id === 'imran_agent' ? 35000 : 30000));
 
+      const getMidnightCutoff = () => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      };
+      const midnightCutoff = getMidnightCutoff();
+
       if (request.type === 'deposit') {
-        const totalApprovedPlayerDeposits = transactions
-          .filter(t => t.type === 'deposit' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+        const todayApprovedPlayerDeposits = transactions
+          .filter(t => t.type === 'deposit' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')) && t.timestamp >= midnightCutoff)
           .reduce((sum, t) => sum + t.amount, 0);
 
-        const remainingDepositLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerDeposits);
+        const remainingDepositLimit = Math.max(0, totalAgentDeposit - todayApprovedPlayerDeposits);
         if (request.amount > remainingDepositLimit) {
-          alert('⚠️ দুঃখিত! আপনার এই অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত ডিপোজিট লিমিট নেই।');
+          alert('⚠️ দুঃখিত! আপনার আজকের এই ডিপোজিট অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত দৈনিক সীমা নেই। এই সীমাটি প্রতিদিন রাত ১২টায় রিসেট হয়।');
           return;
         }
       } else {
-        const totalApprovedPlayerWithdraws = transactions
-          .filter(t => t.type === 'withdraw' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')))
+        const todayApprovedPlayerWithdraws = transactions
+          .filter(t => t.type === 'withdraw' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')) && t.timestamp >= midnightCutoff)
           .reduce((sum, t) => sum + t.amount, 0);
 
-        const remainingWithdrawLimit = Math.max(0, totalAgentDeposit - totalApprovedPlayerWithdraws);
+        const remainingWithdrawLimit = Math.max(0, totalAgentDeposit - todayApprovedPlayerWithdraws);
         if (request.amount > remainingWithdrawLimit) {
-          alert('⚠️ দুঃখিত! আপনার এই অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত উইথড্র লিমিট নেই।');
+          alert('⚠️ দুঃখিত! আপনার আজকের এই উইথড্র অনুরোধটি অনুমোদন করার জন্য পর্যাপ্ত দৈনিক সীমা নেই। এই সীমাটি প্রতিদিন রাত ১২টায় রিসেট হয়।');
           return;
         }
       }
