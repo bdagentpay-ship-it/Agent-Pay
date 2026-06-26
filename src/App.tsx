@@ -45,6 +45,7 @@ import Header from './components/Header';
 import QuickMenu from './components/QuickMenu';
 import NotificationCenter from './components/NotificationCenter';
 import Modals from './components/Modals';
+import HistoryTracker from './components/HistoryTracker';
 
 import { 
   Lock, 
@@ -57,8 +58,27 @@ import {
 
 export default function App() {
   // Authentication & Session States
-  const [isLogged, setIsLogged] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState('default_agent');
+  const [isLogged, setIsLogged] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('agentpay_is_logged');
+      return val ? JSON.parse(val) : false;
+    } catch (e) {
+      return false;
+    }
+  });
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(() => {
+    try {
+      const val = localStorage.getItem('agentpay_selected_agent_id');
+      if (val) return JSON.parse(val);
+      
+      const savedAgent = localStorage.getItem('agentpay_agent');
+      if (savedAgent) {
+        const parsed = JSON.parse(savedAgent);
+        if (parsed && parsed.id) return parsed.id;
+      }
+    } catch (e) {}
+    return 'imran_agent';
+  });
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   
   // Login form states
@@ -886,6 +906,51 @@ export default function App() {
     return reqId;
   };
 
+  // 3b. Automated Payment Gateway Recharge (Add Money)
+  const handleGatewayRecharge = (
+    amount: number,
+    method: 'bKash' | 'Nagad',
+    senderNumber: string,
+    txid: string,
+    customAgentId?: string
+  ): string => {
+    const reqId = "REQ-GATEWAY-" + Math.floor(10000 + Math.random() * 90000);
+    
+    const newReq: BalanceRequest = {
+      id: reqId,
+      amount,
+      method,
+      senderNumber,
+      txid,
+      timestamp: Date.now(),
+      status: 'approved',
+      agentId: customAgentId || agent.id || 'default_agent',
+      screenshotUrl: ''
+    };
+    
+    // Save to balanceRequests
+    const updatedReqs = [newReq, ...balanceRequests];
+    setBalanceRequests(updatedReqs);
+    saveLocalData('balance_requests', updatedReqs);
+    updateFirebaseDoc('balance_requests', reqId, newReq);
+    
+    // Call handleApproveRequest to immediately process the balance, referrals and notification!
+    handleApproveRequest(reqId, newReq);
+
+    // Also push a gateway specific completed transaction / notification
+    const newNotif: NotificationItem = {
+      id: "N-GATEWAY-" + Date.now(),
+      title: "অটো গেটওয়ে পেমেন্ট সফল!",
+      body: `আপনার ${amount.toLocaleString('bn-BD')} টাকার অটো গেটওয়ে পেমেন্ট (${method === 'bKash' ? 'বিকাশ' : 'নগদ'}) সফল হয়েছে এবং ওয়ালেটে ব্যালেন্স সাথে সাথে যুক্ত করা হয়েছে।`,
+      timestamp: Date.now(),
+      read: false,
+      type: 'balance'
+    };
+    appendNotification(newNotif);
+
+    return reqId;
+  };
+
   // 4. Commission Withdrawal / Conversion
   const handleCommissionWithdrawal = (
     amount: number, 
@@ -1251,14 +1316,39 @@ export default function App() {
 
   const totalAgentDeposit = approvedWalletDeposits || (agent.id === 'default_agent' ? 145000 : (agent.id === 'imran_agent' ? 35000 : 30000));
 
+  // Dynamic calculations for Today's Deposit and Today's Withdraw (resets at midnight local time)
+  const getMidnightCutoff = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const midnightCutoff = getMidnightCutoff();
+
+  const todayDeposit = transactions
+    .filter(t => t.type === 'deposit' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')) && t.timestamp >= midnightCutoff)
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const todayWithdraw = transactions
+    .filter(t => t.type === 'withdraw' && t.status === 'completed' && (t.agentId === agent.id || (!t.agentId && agent.id === 'default_agent')) && t.timestamp >= midnightCutoff)
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const computedAgent = {
+    ...agent,
+    todayDeposit,
+    todayWithdraw
+  };
+
   // AGENT SIMULATED SECURE ACCESS GATEWAY
   const handleProfileSelect = (agentId: string) => {
     const matchingAgent = allAgents.find(a => a.id === agentId);
     if (matchingAgent) {
       setAgent(matchingAgent);
+      saveLocalData('agent', matchingAgent);
     }
     setSelectedAgentId(agentId);
+    saveLocalData('selected_agent_id', agentId);
     setIsLogged(true);
+    saveLocalData('is_logged', true);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -1275,8 +1365,11 @@ export default function App() {
 
     if (matched) {
       setAgent(matched);
+      saveLocalData('agent', matched);
       setSelectedAgentId(matched.id);
+      saveLocalData('selected_agent_id', matched.id);
       setIsLogged(true);
+      saveLocalData('is_logged', true);
       setLoginError('');
       
       const newNotif: NotificationItem = {
@@ -1403,11 +1496,15 @@ export default function App() {
     appendNotification(newNotif);
 
     setIsLogged(true);
+    saveLocalData('is_logged', true);
+    setSelectedAgentId(customId);
+    saveLocalData('selected_agent_id', customId);
     setLoginError('');
   };
 
   const handleLogout = () => {
     setIsLogged(false);
+    saveLocalData('is_logged', false);
     setLoginPassword('');
     setActiveModal(null);
   };
@@ -1824,27 +1921,52 @@ export default function App() {
             </div>
 
             {/* Selection profile buttons */}
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider">রানিং টেস্ট একাউন্ট সিলেক্ট করুনঃ</span>
-              <button
-                type="button"
-                id="default_agent_btn"
-                onClick={() => handleProfileSelect('default_agent')}
-                className="p-3.5 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-50 border border-blue-100 text-blue-650">
-                    <Building className="w-4 h-4" />
+              
+              <div className="flex flex-col gap-2">
+                {/* Johnny Enterprise Button */}
+                <button
+                  type="button"
+                  id="default_agent_btn"
+                  onClick={() => handleProfileSelect('default_agent')}
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-1.5 rounded-lg bg-blue-50 text-blue-650">
+                      <Building className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">জনি এন্টারপ্রাইজ (ডিফল্ট)</span>
+                      <span className="text-[9px] text-slate-500 font-sans">ID: DEFAULT_AGENT • ব্যালেন্স ৳১.৪৫ লক্ষ</span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">জনি এন্টারপ্রাইজ (ডিফল্ট)</span>
-                    <span className="text-[9.5px] text-slate-505 font-sans">ID: DEFAULT_AGENT • ব্যালেন্স ৳১.৪৫ লক্ষ</span>
+                  <div className="p-1 px-2.5 rounded-lg bg-blue-600 text-white shadow-2xs hover:bg-blue-750 transition text-[9.5px] font-bold font-sans">
+                    কানেক্ট
                   </div>
-                </div>
-                <div className="p-1.5 px-3.5 rounded-lg bg-blue-600 text-white shadow-2xs hover:bg-blue-750 transition text-[10.5px] font-bold font-sans">
-                  কানেক্ট
-                </div>
-              </button>
+                </button>
+
+                {/* Imran Hossain Button */}
+                <button
+                  type="button"
+                  id="imran_agent_btn"
+                  onClick={() => handleProfileSelect('imran_agent')}
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-650">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">ইমরান হোসেন (এজেন্ট)</span>
+                      <span className="text-[9px] text-slate-500 font-sans">ID: IMRAN_AGENT • ব্যালেন্স ৳৩৫,০০০</span>
+                    </div>
+                  </div>
+                  <div className="p-1 px-2.5 rounded-lg bg-emerald-600 text-white shadow-2xs hover:bg-emerald-750 transition text-[9.5px] font-bold font-sans">
+                    কানেক্ট
+                  </div>
+                </button>
+              </div>
             </div>
 
             <div className="text-center text-[9px] text-slate-400 font-medium">
@@ -1864,7 +1986,7 @@ export default function App() {
               
               {/* Header components */}
               <Header 
-                agent={agent}
+                agent={computedAgent}
                 unreadCount={unreadCount}
                 onOpenNotifications={() => setIsNotificationPanelOpen(true)}
                 isFirebaseSynced={isFirebaseSynced}
@@ -1872,6 +1994,12 @@ export default function App() {
                 onOpenProfile={() => setActiveModal('profile')}
                 onLogout={handleLogout}
                 totalAgentDeposit={totalAgentDeposit}
+              />
+
+              {/* Previous Date Transaction Tracker */}
+              <HistoryTracker 
+                transactions={transactions}
+                agent={computedAgent}
               />
 
               {/* Quick Shortcuts Menu */}
@@ -1923,6 +2051,7 @@ export default function App() {
             onUpdateProfile={handleUpdateProfile}
             onDeleteTransaction={deleteTransaction}
             allAgents={allAgents}
+            onGatewayRecharge={handleGatewayRecharge}
           />
         )}
       </AnimatePresence>

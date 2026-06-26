@@ -56,6 +56,7 @@ interface ModalProps {
   onUpdateProfile?: (updatedFields: Partial<Agent>) => void;
   onDeleteTransaction?: (txId: string) => void;
   allAgents?: Agent[];
+  onGatewayRecharge?: (amount: number, method: 'bKash' | 'Nagad', senderNumber: string, txid: string, agentId?: string) => string;
 }
 
 interface ModalContainerProps {
@@ -125,7 +126,8 @@ export default function Modals({
   onTriggerPlayerRequest = () => {},
   onUpdateProfile = () => {},
   onDeleteTransaction = () => {},
-  allAgents = []
+  allAgents = [],
+  onGatewayRecharge = () => ''
 }: ModalProps) {
 
   // Translate english numbers to Bengali
@@ -378,6 +380,14 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
   const [generatedReqId, setGeneratedReqId] = useState('');
   const [screenshotUploading, setScreenshotUploading] = useState(false);
 
+  // Gateway specific states
+  const [rechargeType, setRechargeType] = useState<'gateway' | 'manual'>('manual');
+  const [gatewayStep, setGatewayStep] = useState<'none' | 'loading' | 'phone' | 'otp' | 'pin' | 'processing' | 'success'>('none');
+  const [gatewayPhone, setGatewayPhone] = useState(agent.phone || '');
+  const [gatewayOtp, setGatewayOtp] = useState('');
+  const [gatewayPin, setGatewayPin] = useState('');
+  const [gatewayTxid, setGatewayTxid] = useState('');
+
   // Compressed Base64 Image Generator
   const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -417,6 +427,59 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
     
     setErrorMsg('');
     setBalanceStep(2);
+  };
+
+  const handleGatewaySubmitPhone = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (gatewayPhone.trim().length < 11) {
+      setErrorMsg('সঠিক ১১-সংখ্যার মোবাইল নম্বর দিন!');
+      return;
+    }
+    setErrorMsg('');
+    setGatewayStep('loading');
+    setTimeout(() => {
+      setGatewayStep('otp');
+    }, 1000);
+  };
+
+  const handleGatewaySubmitOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (gatewayOtp.trim().length < 4) {
+      setErrorMsg('সঠিক ভেরিফিকেশন কোড (OTP) দিন!');
+      return;
+    }
+    setErrorMsg('');
+    setGatewayStep('loading');
+    setTimeout(() => {
+      setGatewayStep('pin');
+    }, 1000);
+  };
+
+  const handleGatewaySubmitPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (gatewayPin.trim().length < 4) {
+      setErrorMsg('সঠিক পিন (PIN) নম্বর দিন!');
+      return;
+    }
+    setErrorMsg('');
+    setGatewayStep('processing');
+    
+    // Generate a simulated official transaction ID
+    const randomTxid = (reqMethod === 'bKash' ? 'BK' : 'NG') + Math.floor(10000000 + Math.random() * 90000000).toString(16).toUpperCase();
+    setGatewayTxid(randomTxid);
+
+    setTimeout(() => {
+      // Trigger the real auto-recharge and referral rewards via our callback!
+      const reqId = onGatewayRecharge(parseFloat(amountInput), reqMethod as 'bKash' | 'Nagad', gatewayPhone, randomTxid, customAgentId);
+      setGeneratedReqId(reqId);
+      setGatewayStep('success');
+      
+      // Auto close and reset
+      setTimeout(() => {
+        setGatewayStep('none');
+        onClose();
+      }, 3000);
+    }, 2500);
   };
 
   const handleBalanceStep2Submit = (e: React.FormEvent) => {
@@ -817,9 +880,13 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
 
                       {isQuotaInsufficient && (
                         <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl leading-relaxed font-medium">
-                          ⚠️ <strong>অনুমোদন ব্লক করা হয়েছে:</strong> আপনার আজকের অবশিষ্ট উইথড্রাল অনুমোদন সীমা অপর্যাপ্ত। আপনার দৈনিক উইথড্র সীমা চিরতরে বাড়াতে অ্যাডমিন ড্যাশবোর্ডে নতুন রিচার্জ (জমা) করুন অথবা আগামীকাল পর্যন্ত অপেক্ষা করুন (প্রতিদিন রাত ১২টায় স্বয়ংক্রিয়ভাবে রিসেট হয়)।
+                          ⚠️ <strong>অনুমোদন ব্লক করা হয়েছে:</strong> আপনার আজকের অবশিষ্ট উইথড্রাল অনুমোদন সীমা অপর্যাপ্ত। আপনার দৈনিক উইথড্র সীমা চিরতরে বাড়াতে অ্যাডমিন ড্যাশবোর্ডে নতুন রিচার্জ (জমা) করুন অথবা আগামীকাল পর্যন্ত অপেক্ষা করুন।
                         </div>
                       )}
+
+                      <div className="bg-amber-50 border border-amber-150 rounded-xl p-3 text-[10.5px] leading-relaxed text-amber-800">
+                        ℹ️ গ্রাহকের দেওয়া রিসিভিং নাম্বারে ম্যানুয়ালি <strong>৳{selectedPlayerReq.amount.toLocaleString('bn-BD')} টাকা</strong> পাঠিয়ে দিয়ে <strong>এপ্রুভ করুন</strong> বাটনে চাপ দিন। আপনার লেজার ব্যালেন্স থেকে কোনো টাকা কাটবে না, উল্টো ২ সেকেন্ডে ২.০% কমিশন লেজারে ক্রেডিট হয়ে যাবে।
+                      </div>
 
                       <div className="grid grid-cols-2 gap-3 mt-1">
                         <button
@@ -828,9 +895,9 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                             onResolvePlayerRequest(selectedPlayerReq.id, 'rejected');
                             setResolvedReceipt({ req: selectedPlayerReq, status: 'rejected', timestamp: Date.now() });
                           }}
-                          className="py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold cursor-pointer"
+                          className="py-2.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-bold cursor-pointer"
                         >
-                          বাতিল করুন
+                          অনুরোধ বাতিল করুন
                         </button>
                         <button
                           type="button"
@@ -842,10 +909,10 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                           className={`py-2.5 rounded-xl text-white font-bold shadow-xs transition leading-normal ${
                             isQuotaInsufficient 
                               ? 'bg-slate-350 cursor-not-allowed opacity-50' 
-                              : 'bg-rose-600 hover:bg-rose-700 cursor-pointer'
+                              : 'bg-[#ff7947] hover:bg-[#e05622] cursor-pointer'
                           }`}
                         >
-                          উইথড্র এপ্রুভ করুন
+                          এপ্রুভ করুন (৳{selectedPlayerReq.amount.toLocaleString('bn-BD')})
                         </button>
                       </div>
                     </>
@@ -854,27 +921,26 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
               </div>
             ) : (
               
-              /* 2.3 SHOW LIST OF ALL PENDING WITHDRAWALS */
+              /* 2.3 SHOW LIST OF ALL PENDING WITHDRAWS */
               <div className="flex flex-col gap-4 font-sans text-xs">
-                <div className="p-3.5 bg-rose-50/50 rounded-xl border border-rose-150 flex items-center justify-between">
+                <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-150 flex items-center justify-between">
                   <div>
-                    <h5 className="font-bold text-rose-900 text-xs">উইথড্র রিফ্রেশ ক্যু</h5>
-                    <span className="text-[10px] text-rose-700">পরবর্তী স্বয়ংক্রিয় অনুরোধঃ <strong className="font-mono text-xs">{timeLeft}</strong> সেকেন্ড</span>
+                    <h5 className="font-bold text-amber-900 text-xs">উইথড্রাল নোটিফিকেশন পুল</h5>
+                    <span className="text-[10px] text-amber-700">পরবর্তী স্বয়ংক্রিয় অনুরোধঃ <strong className="font-mono text-xs">{timeLeft}</strong> সেকেন্ড</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => onTriggerPlayerRequest('withdraw')}
-                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10.5px] font-bold transition shadow-2xs cursor-pointer active:scale-97"
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-[10.5px] font-bold text-white transition cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm"
                   >
-                    ⚡ অনুরোধ আনুন
+                    ⚡ ম্যানুয়াল রিকোয়েস্ট
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-2 max-h-80 overflow-y-auto no-scrollbar font-sans pr-0.5">
+                <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1">
                   {playerRequests.filter(r => r.type === 'withdraw' && r.status === 'pending').length === 0 ? (
-                    <div className="text-center py-10 text-slate-400 text-xs flex flex-col items-center gap-2">
-                      <TrendingDown className="w-8 h-8 text-slate-300 opacity-60 flex-shrink-0" />
-                      <span>কোন বকেয়া প্লেয়ার উইথড্রয়াল অনুরোধ নেই।</span>
+                    <div className="flex flex-col items-center justify-center text-center py-8 px-4 text-slate-400 gap-1 border border-dashed border-slate-200 rounded-xl">
+                      <span>📥 পেন্ডিং উইথড্রাল অনুরোধ ক্যু খালি আছে</span>
                       <p className="text-[10px] text-slate-400 mt-1 max-w-[250px]">টপ-রাইট বাটন চেপে সরাসরি ডেমো খেলোয়াড় অনুরোধ যোগ করতে পারবেন।</p>
                     </div>
                   ) : (
@@ -882,19 +948,19 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                       <div
                         key={req.id}
                         onClick={() => { setErrorMsg(''); setSelectedPlayerReq(req); }}
-                        className="p-3 bg-white border border-slate-200 hover:border-rose-300 rounded-xl flex items-center justify-between transition duration-150 shadow-3xs cursor-pointer hover:scale-[1.01]"
+                        className="p-3 bg-white border border-slate-200 hover:border-amber-300 rounded-xl flex items-center justify-between transition duration-150 shadow-3xs cursor-pointer hover:scale-[1.01]"
                       >
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-slate-800 text-[12.5px] font-mono">{req.playerId}</span>
-                            <span className="text-[9px] uppercase font-bold text-rose-850 bg-rose-50 border border-rose-100 px-1.5 py-0.2 rounded-sm">{req.siteName}</span>
+                            <span className="text-[9px] uppercase font-bold text-amber-800 bg-amber-50 border border-amber-100 px-1.5 py-0.2 rounded-sm">{req.siteName}</span>
                           </div>
                           <span className="text-[10px] text-slate-400 font-sans">পেমেন্টঃ <strong className="text-slate-600 uppercase font-bold">{req.paymentMethod}</strong> • {req.senderNumber}</span>
                         </div>
 
                         <div className="text-right flex flex-col items-end gap-1">
-                          <span className="text-xs font-bold text-rose-700">৳{req.amount.toLocaleString('bn-BD')}</span>
-                          <span className="text-[9.5px] font-bold text-slate-400 hover:text-rose-700 transition">অনুমোদন বিবরণ →</span>
+                          <span className="text-xs font-bold text-amber-700">৳{req.amount.toLocaleString('bn-BD')}</span>
+                          <span className="text-[9.5px] font-bold text-slate-400 hover:text-amber-700 transition">বিবরণ দেখুন →</span>
                         </div>
                       </div>
                     ))
@@ -906,258 +972,260 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
           </div>
         </ModalContainer>
       )}
-
       {/* 3. ADD BALANCE MODAL */}
       {type === 'add_balance' && (
-        <ModalContainer title="মূল এজেন্ট ব্যালেন্স রিচার্জ পোর্টাল" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
-          {balanceStep === 1 && (
-            <form onSubmit={handleBalanceStep1Submit} className="flex flex-col gap-4 font-sans">
-              <div className="p-3 bg-blue-50 border border-blue-105 rounded-xl text-xs text-blue-700 leading-relaxed font-sans">
-                💡 <strong>ধাপ ১ (তথ্য সংগ্রহ):</strong> ব্যালেন্স যুক্ত করতে অনুগ্রহ করে আপনার বিবরণ এবং রিচার্জের কাঙ্ক্ষিত মাধ্যম ও টাকার পরিমাণ প্রদান করুন।
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">এজেন্ট আইডি (Agent ID)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">👤</span>
-                  <input
-                    type="text"
-                    placeholder="যেমনঃ AG-49102"
-                    value={customAgentId}
-                    onChange={(e) => { setErrorMsg(''); setCustomAgentId(e.target.value); }}
-                    className="w-full pl-8 pr-4 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
-                    required
-                  />
+          <ModalContainer title="মূল এজেন্ট ব্যালেন্স রিচার্জ পোর্টাল" onClose={onClose} errorMsg={errorMsg} successMsg={successMsg}>
+            {balanceStep === 1 && (
+              <form onSubmit={handleBalanceStep1Submit} className="flex flex-col gap-4 font-sans">
+                <div className="p-3 bg-blue-50 border border-blue-105 rounded-xl text-xs text-blue-700 leading-relaxed font-sans">
+                  💡 <strong>ধাপ ১ (তথ্য সংগ্রহ):</strong> ব্যালেন্স যুক্ত করতে অনুগ্রহ করে আপনার বিবরণ এবং রিচার্জের কাঙ্ক্ষিত মাধ্যম ও টাকার পরিমাণ প্রদান করুন।
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">পেমেন্ট মেথড (Payment Method)</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['Bank', 'bKash', 'Nagad', 'Rocket'] as const).map((m) => (
-                    <button
-                      type="button"
-                      key={m}
-                      onClick={() => setReqMethod(m)}
-                      className={`py-2 text-[11px] font-bold rounded-lg border text-center transition cursor-pointer ${
-                        reqMethod === m 
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {m === 'Bank' ? 'City Bank' : m}
-                    </button>
-                  ))}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">এজেন্ট আইডি (Agent ID)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">👤</span>
+                    <input
+                      type="text"
+                      placeholder="যেমনঃ AG-49102"
+                      value={customAgentId}
+                      onChange={(e) => { setErrorMsg(''); setCustomAgentId(e.target.value); }}
+                      className="w-full pl-8 pr-4 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">টাকার পরিমাণ (Amount)</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-450 font-bold text-sm">৳</span>
-                  <input
-                    type="number"
-                    placeholder="যেমনঃ ৫০,০০০"
-                    value={amountInput}
-                    onChange={(e) => { setErrorMsg(''); setAmountInput(e.target.value); }}
-                    className="w-full pl-9 pr-4 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-850 outline-none transition font-bold"
-                    required
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white transition mt-2 cursor-pointer shadow-xs flex items-center justify-center gap-1.5 active:scale-98"
-              >
-                পরবর্তী ধাপে যান <ChevronRight className="w-4 h-4" />
-              </button>
-            </form>
-          )}
-
-          {balanceStep === 2 && (
-            <form onSubmit={handleBalanceStep2Submit} className="flex flex-col gap-3.5 font-sans">
-              <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl flex flex-col gap-2.5">
-                <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">টাকা পাঠানোর আমাদের পেমেন্ট নাম্বারসমূহঃ</span>
-                
-                <div className="flex flex-col gap-2">
-                  {(reqMethod === 'bKash'
-                    ? [{ label: 'বিকাশ পার্সোনাল', num: '01852-801643' }]
-                    : reqMethod === 'Nagad'
-                    ? [{ label: 'নগদ পার্সোনাল', num: '01852-801643' }]
-                    : reqMethod === 'Rocket'
-                    ? [{ label: 'রকেট পার্সোনাল', num: '01701-976286' }]
-                    : [{ label: 'বিকাশ/নগদ পেমেন্ট গেটওয়ে', num: '01852-801643' }]
-                  ).map((p, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg">
-                      <div className="flex flex-col">
-                        <span className="text-[9.5px] font-bold text-rose-500 uppercase">{p.label}</span>
-                        <span className="text-xs font-mono font-bold text-slate-800">{p.num}</span>
-                      </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">পেমেন্ট মেথড (Payment Method)</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(['Bank', 'bKash', 'Nagad', 'Rocket'] as const).map((m) => (
                       <button
                         type="button"
+                        key={m}
                         onClick={() => {
-                          const cleanedNum = p.num.replace(/[^0-9]/g, '');
-                          navigator.clipboard.writeText(cleanedNum);
-                          setSuccessMsg('নাম্বারটি ক্লিপবোর্ডে কপি হয়েছে!');
-                          setTimeout(() => setSuccessMsg(''), 1500);
+                          setReqMethod(m);
+                          setRechargeType('manual');
                         }}
-                        className="p-1 px-2 rounded-md hover:bg-rose-50 font-sans text-[10px] font-bold text-rose-600 border border-rose-100 flex items-center gap-1 transition"
+                        className={`py-2 text-[11px] font-bold rounded-lg border text-center transition cursor-pointer ${
+                          reqMethod === m 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
-                        <Copy className="w-3 h-3" /> কপি করুন
+                        {m === 'Bank' ? 'City Bank' : m}
                       </button>
-                    </div>
-                  ))}
-                </div>
-                
-                <p className="text-[10px] text-rose-600/80 font-medium leading-relaxed">
-                  ⚠️ <strong>সতর্কতা:</strong> উপরের নাম্বারে সেন্ড মানি/ক্যাশইন সফলভাবে সম্পন্ন করার পর নিচের ফর্মটি পূরণ করে অনুরোধ সাবমিট করুন।
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">আপনার প্রেরক নাম্বার</label>
-                  <input
-                    type="text"
-                    placeholder="যেমনঃ 01812XXXXXX"
-                    value={senderNumber}
-                    onChange={(e) => { setErrorMsg(''); setSenderNumber(e.target.value); }}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
-                    required
-                  />
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">ট্রানজেকশন আইডি (TxID)</label>
-                  <input
-                    type="text"
-                    placeholder="যেমনঃ BK9851025B"
-                    value={txid}
-                    onChange={(e) => { setErrorMsg(''); setTxid(e.target.value); }}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 uppercase outline-none transition font-mono font-bold"
-                    required
-                  />
+                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">টাকার পরিমাণ (Amount)</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-450 font-bold text-sm">৳</span>
+                    <input
+                      type="number"
+                      placeholder="যেমনঃ ৫০,০০০"
+                      value={amountInput}
+                      onChange={(e) => { setErrorMsg(''); setAmountInput(e.target.value); }}
+                      className="w-full pl-9 pr-4 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-850 outline-none transition font-bold"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Screenshot Upload Support */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">পেমেন্ট স্ক্রিনশট আপলোড (ঐচ্ছিক)</label>
-                <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-3 bg-slate-50/50 hover:bg-blue-50/10 transition flex flex-col items-center justify-center gap-2 relative">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleScreenshotChange}
-                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
-                    id="screenshot-file-input"
-                  />
-                  {screenshotUploading ? (
-                    <span className="text-[11px] font-bold text-slate-500 animate-pulse">প্রসেসিং হচ্ছে...</span>
-                  ) : screenshotUrl ? (
-                    <div className="flex flex-col items-center gap-1.5 relative z-20">
-                      <img src={screenshotUrl} alt="Screenshot" className="h-14 w-auto rounded-md border border-slate-200 shadow-sm object-cover" referrerPolicy="no-referrer" />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setScreenshotUrl('');
-                        }}
-                        className="text-[9.5px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100 hover:bg-rose-100"
-                      >
-                        রিমুভ করুন
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center text-center gap-1">
-                      <Upload className="w-5 h-5 text-slate-400" />
-                      <span className="text-[10.5px] text-slate-500 font-semibold">ক্লিক করে স্ক্রিনশট সিলেক্ট করুন</span>
-                      <span className="text-[9px] text-slate-400">JPG বা PNG ফরম্যাট</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setBalanceStep(1)}
-                  className="w-1/3 py-2.5 rounded-xl border border-slate-205 text-xs text-slate-600 font-bold hover:bg-slate-50 transition cursor-pointer"
-                >
-                  পিছনে যান
-                </button>
                 <button
                   type="submit"
-                  id="submit_add_balance_btn"
-                  className="w-2/3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white transition cursor-pointer shadow-xs flex items-center justify-center gap-1.5 active:scale-98"
+                  className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white transition mt-2 cursor-pointer shadow-xs flex items-center justify-center gap-1.5 active:scale-98"
                 >
-                  অনুরোধ সাবমিট করুন
+                  পরবর্তী ধাপে যান <ChevronRight className="w-4 h-4" />
                 </button>
-              </div>
-            </form>
-          )}
+              </form>
+            )}
 
-          {balanceStep === 3 && (
-            <div className="flex flex-col items-center text-center py-4 font-sans">
-              <div className="w-14 h-14 bg-emerald-100 border border-emerald-200 text-emerald-600 rounded-full flex items-center justify-center mb-3">
-                <CheckCircle2 className="w-8 h-8 animate-bounce" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-850">ব্যালেন্স রিচার্জ অনুরোধ সাবমিট হয়েছে!</h3>
-              <p className="text-[11px] text-slate-500 mt-1 max-w-xs leading-relaxed">
-                আপনার অনুরোধটি এডমিন ডাটাবেসে নিবন্ধিত হয়েছে। এখন নিচে দেওয়া পেমেন্ট ডিরেক্ট লিংকটি কপি করুন অথবা সরাসরি টেলিগ্রামে এডমিনের কাছে পাঠিয়ে দিন।
-              </p>
+            {balanceStep === 2 && (
+              <form onSubmit={handleBalanceStep2Submit} className="flex flex-col gap-3.5 font-sans">
+                <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl flex flex-col gap-2.5">
+                  <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">টাকা পাঠানোর আমাদের পেমেন্ট নাম্বারসমূহঃ</span>
+                  
+                  <div className="flex flex-col gap-2">
+                    {(reqMethod === 'bKash'
+                      ? [{ label: 'বিকাশ পার্সোনাল', num: '01852-801643' }]
+                      : reqMethod === 'Nagad'
+                      ? [{ label: 'নগদ পার্সোনাল', num: '01852-801643' }]
+                      : reqMethod === 'Rocket'
+                      ? [{ label: 'রকেট পার্সোনাল', num: '01701-976286' }]
+                      : [{ label: 'বিকাশ/নগদ পেমেন্ট গেটওয়ে', num: '01852-801643' }]
+                    ).map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg">
+                        <div className="flex flex-col">
+                          <span className="text-[9.5px] font-bold text-rose-500 uppercase">{p.label}</span>
+                          <span className="text-xs font-mono font-bold text-slate-800">{p.num}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cleanedNum = p.num.replace(/[^0-9]/g, '');
+                            navigator.clipboard.writeText(cleanedNum);
+                            setSuccessMsg('নাম্বারটি ক্লিপবোর্ডে কপি হয়েছে!');
+                            setTimeout(() => setSuccessMsg(''), 1500);
+                          }}
+                          className="p-1 px-2 rounded-md hover:bg-rose-50 font-sans text-[10px] font-bold text-rose-600 border border-rose-100 flex items-center gap-1 transition"
+                        >
+                          <Copy className="w-3 h-3" /> কপি করুন
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <p className="text-[10px] text-rose-600/80 font-medium leading-relaxed">
+                    ⚠️ <strong>সতর্কতা:</strong> উপরের নাম্বারে সেন্ড মানি/ক্যাশইন সফলভাবে সম্পন্ন করার পর নিচের ফর্মটি পূরণ করে অনুরোধ সাবমিট করুন।
+                  </p>
+                </div>
 
-              {/* Unique Generation Link */}
-              <div className="w-full mt-4 bg-slate-50 border border-slate-150 p-3 rounded-xl flex flex-col gap-1.5 text-left text-xs">
-                <span className="text-[9.5px] font-bold text-slate-450 uppercase block tracking-wider">ডিপোজিট বিবরণ যাচাইকরণ লিংক:</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${window.location.origin}/?request_id=${generatedReqId}`}
-                    className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-[10.5px] font-mono text-slate-705 outline-none font-medium select-all"
-                  />
+                <div className="grid grid-cols-2 gap-3.5">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">আপনার প্রেরক নাম্বার</label>
+                    <input
+                      type="text"
+                      placeholder="যেমনঃ 01812XXXXXX"
+                      value={senderNumber}
+                      onChange={(e) => { setErrorMsg(''); setSenderNumber(e.target.value); }}
+                      className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 outline-none transition font-semibold"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">ট্রানজেকশন আইডি (TxID)</label>
+                    <input
+                      type="text"
+                      placeholder="যেমনঃ BK9851025B"
+                      value={txid}
+                      onChange={(e) => { setErrorMsg(''); setTxid(e.target.value); }}
+                      className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 uppercase outline-none transition font-mono font-bold"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Screenshot Upload Support */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wide">পেমেন্ট স্ক্রিনশট আপলোড (ঐচ্ছিক)</label>
+                  <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-3 bg-slate-50/50 hover:bg-blue-50/10 transition flex flex-col items-center justify-center gap-2 relative">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleScreenshotChange}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                      id="screenshot-file-input"
+                    />
+                    {screenshotUploading ? (
+                      <span className="text-[11px] font-bold text-slate-500 animate-pulse">প্রসেসিং হচ্ছে...</span>
+                    ) : screenshotUrl ? (
+                      <div className="flex flex-col items-center gap-1.5 relative z-20">
+                        <img src={screenshotUrl} alt="Screenshot" className="h-14 w-auto rounded-md border border-slate-200 shadow-sm object-cover" referrerPolicy="no-referrer" />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setScreenshotUrl('');
+                          }}
+                          className="text-[9.5px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100 hover:bg-rose-100"
+                        >
+                          রিমুভ করুন
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center text-center gap-1">
+                        <Upload className="w-5 h-5 text-slate-400" />
+                        <span className="text-[10.5px] text-slate-500 font-semibold">ক্লিক করে স্ক্রিনশট সিলেক্ট করুন</span>
+                        <span className="text-[9px] text-slate-400">JPG বা PNG ফরম্যাট</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/?request_id=${generatedReqId}`);
-                      setLinkCopied(true);
-                      setTimeout(() => setLinkCopied(false), 2000);
-                    }}
-                    className={`p-2 rounded-lg border text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer ${
-                      linkCopied 
-                        ? 'bg-emerald-50 border-emerald-250 text-emerald-700' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
+                    onClick={() => setBalanceStep(1)}
+                    className="w-1/3 py-2.5 rounded-xl border border-slate-205 text-xs text-slate-600 font-bold hover:bg-slate-50 transition cursor-pointer"
                   >
-                    {linkCopied ? 'কপিড!' : <Copy className="w-3.5 h-3.5" />}
+                    পিছনে যান
+                  </button>
+                  <button
+                    type="submit"
+                    id="submit_add_balance_btn"
+                    className="w-2/3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white transition cursor-pointer shadow-xs flex items-center justify-center gap-1.5 active:scale-98"
+                  >
+                    অনুরোধ সাবমিট করুন
                   </button>
                 </div>
+              </form>
+            )}
+
+            {balanceStep === 3 && (
+              <div className="flex flex-col items-center text-center py-4 font-sans">
+                <div className="w-14 h-14 bg-emerald-100 border border-emerald-200 text-emerald-600 rounded-full flex items-center justify-center mb-3">
+                  <CheckCircle2 className="w-8 h-8 animate-bounce" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-850">ব্যালেন্স রিচার্জ অনুরোধ সাবমিট হয়েছে!</h3>
+                <p className="text-[11px] text-slate-500 mt-1 max-w-xs leading-relaxed">
+                  আপনার অনুরোধটি এডমিন ডাটাবেসে নিবন্ধিত হয়েছে। এখন নিচে দেওয়া পেমেন্ট ডিরেক্ট লিংকটি কপি করুন অথবা সরাসরি টেলিগ্রামে এডমিনের কাছে পাঠিয়ে দিন।
+                </p>
+
+                {/* Unique Generation Link */}
+                <div className="w-full mt-4 bg-slate-50 border border-slate-150 p-3 rounded-xl flex flex-col gap-1.5 text-left text-xs">
+                  <span className="text-[9.5px] font-bold text-slate-450 uppercase block tracking-wider">ডিপোজিট বিবরণ যাচাইকরণ লিংক:</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/?request_id=${generatedReqId}`}
+                      className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-[10.5px] font-mono text-slate-705 outline-none font-medium select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/?request_id=${generatedReqId}`);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 2000);
+                      }}
+                      className={`p-2 rounded-lg border text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer ${
+                        linkCopied 
+                          ? 'bg-emerald-50 border-emerald-250 text-emerald-700' 
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {linkCopied ? 'কপিড!' : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Telegram admin connector */}
+                <a
+                  href={`https://t.me/bdagentpay?text=${encodeURIComponent(
+                    `আসসালামু আলাইকুম এডমিন, আমি ব্যালেন্স রিচার্জের একটি অনুরোধ পাঠিয়েছি। অনুগ্রহ করে যাচাই করুন:\n\n🔗 অনুরোধের লিংক: ${window.location.origin}/?request_id=${generatedReqId}`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full mt-4.5 py-3 rounded-xl bg-[#229ED9] hover:bg-[#1a85b9] text-xs font-extrabold text-white flex items-center justify-center gap-2.5 transition shadow-sm cursor-pointer group animate-pulse hover:animate-none"
+                >
+                  <Send className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> 
+                  টেলিগ্রামে এডমিনকে লিংক পাঠান
+                </a>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full mt-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs text-slate-650 font-bold transition cursor-pointer"
+                >
+                  ওয়ালেট প্যানেলে ফিরে যান
+                </button>
               </div>
-
-              {/* Telegram admin connector */}
-              <a
-                href={`https://t.me/bdwalletagent?text=${encodeURIComponent(
-                  `আসসালামু আলাইকুম এডমিন, আমি ব্যালেন্স রিচার্জের একটি অনুরোধ পাঠিয়েছি। অনুগ্রহ করে যাচাই করুন:\n\n🔗 অনুরোধের লিংক: ${window.location.origin}/?request_id=${generatedReqId}`
-                )}`}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full mt-4.5 py-3 rounded-xl bg-[#229ED9] hover:bg-[#1a85b9] text-xs font-extrabold text-white flex items-center justify-center gap-2.5 transition shadow-sm cursor-pointer group animate-pulse hover:animate-none"
-              >
-                <Send className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> 
-                টেলিগ্রামে এডমিনকে লিংক পাঠান
-              </a>
-
-              <button
-                type="button"
-                onClick={onClose}
-                className="w-full mt-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs text-slate-650 font-bold transition cursor-pointer"
-              >
-                ওয়ালেট প্যানেলে ফিরে যান
-              </button>
-            </div>
-          )}
-        </ModalContainer>
+            )}
+          </ModalContainer>
       )}
 
       {/* 4. WITHDRAW COMMISSION MODAL */}
@@ -1238,7 +1306,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                       </div>
                     </div>
                     <a
-                      href="https://t.me/bdwalletagent"
+                      href="https://t.me/bdagentpay"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex-shrink-0 p-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition hover:scale-105 flex items-center justify-center gap-1 cursor-pointer"
@@ -1294,7 +1362,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
               <div className="flex justify-center items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-sans">
                 <span>যেকোনো প্রয়োজনে সরাসরিঃ</span>
                 <a
-                  href="https://t.me/bdwalletagent"
+                  href="https://t.me/bdagentpay"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sky-600 hover:text-sky-700 font-bold flex items-center gap-1 transition"
@@ -1384,7 +1452,7 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
                   </div>
 
                   <a
-                    href={`https://t.me/bdwalletagent?text=${encodeURIComponent(
+                    href={`https://t.me/bdagentpay?text=${encodeURIComponent(
                       `আসসালামু আলাইকুম এডমিন, আমি উপার্জিত কমিশন উত্তোলনের অন-লাইন রিকোয়েস্ট সাবমিট করেছি। অনুগ্রহ করে চেক করে পেমেন্ট সম্পূর্ণ করুন:\n\n👤 এজেন্ট আইডি: ${agent.id}\n👤 এজেন্টের নাম: ${agent.name}\n💰 উত্তোলনের পরিমাণ: ৳ ${commAmountValue.toLocaleString('en-US')} টাকা\n💳 গেটওয়ে: ${commMobileMethod} (${receiverNumber})\n🆔 রসিদ আইডি: COM-WD-${Date.now().toString().slice(-6)}\n\nধন্যবাদ!`
                     )}`}
                     target="_blank"
@@ -1747,16 +1815,16 @@ STATUS        : ${status.toUpperCase()} (SUCCESSFULLY COMPLETED)
             </div>
 
             <a
-              href="https://t.me/bdwalletagent"
+              href="https://t.me/bdagentpay"
               target="_blank"
               rel="noopener noreferrer"
               className="px-6 py-3 bg-sky-600 hover:bg-sky-550 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 max-w-xs mx-auto transition shadow-sm cursor-pointer hover:scale-[1.01]"
             >
-              টেলিগ্রাম চ্যাট শুরু করুন (@bdwalletagent)
+              টেলিগ্রাম চ্যাট শুরু করুন (@bdagentpay)
               <ExternalLink className="w-4 h-4" />
             </a>
 
-            <span className="text-[9.5px] text-slate-400 font-sans">অফিসিয়াল ইউজারনেমঃ <code className="text-sky-600 font-bold font-mono text-[11px]">t.me/bdwalletagent</code></span>
+            <span className="text-[9.5px] text-slate-400 font-sans">অফিসিয়াল ইউজারনেমঃ <code className="text-sky-600 font-bold font-mono text-[11px]">t.me/bdagentpay</code></span>
           </div>
         </ModalContainer>
       )}
