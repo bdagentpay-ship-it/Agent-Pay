@@ -77,7 +77,7 @@ export default function App() {
         if (parsed && parsed.id) return parsed.id;
       }
     } catch (e) {}
-    return 'imran_agent';
+    return 'default_agent';
   });
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   
@@ -1921,52 +1921,27 @@ export default function App() {
             </div>
 
             {/* Selection profile buttons */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider">রানিং টেস্ট একাউন্ট সিলেক্ট করুনঃ</span>
-              
-              <div className="flex flex-col gap-2">
-                {/* Johnny Enterprise Button */}
-                <button
-                  type="button"
-                  id="default_agent_btn"
-                  onClick={() => handleProfileSelect('default_agent')}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-lg bg-blue-50 text-blue-650">
-                      <Building className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">জনি এন্টারপ্রাইজ (ডিফল্ট)</span>
-                      <span className="text-[9px] text-slate-500 font-sans">ID: DEFAULT_AGENT • ব্যালেন্স ৳১.৪৫ লক্ষ</span>
-                    </div>
+              <button
+                type="button"
+                id="default_agent_btn"
+                onClick={() => handleProfileSelect('default_agent')}
+                className="p-3.5 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-50 border border-blue-100 text-blue-650">
+                    <Building className="w-4 h-4" />
                   </div>
-                  <div className="p-1 px-2.5 rounded-lg bg-blue-600 text-white shadow-2xs hover:bg-blue-750 transition text-[9.5px] font-bold font-sans">
-                    কানেক্ট
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">জনি এন্টারপ্রাইজ (ডিফল্ট)</span>
+                    <span className="text-[9.5px] text-slate-500 font-sans">ID: DEFAULT_AGENT • ব্যালেন্স ৳১.৪৫ লক্ষ</span>
                   </div>
-                </button>
-
-                {/* Imran Hossain Button */}
-                <button
-                  type="button"
-                  id="imran_agent_btn"
-                  onClick={() => handleProfileSelect('imran_agent')}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/30 border border-slate-200/80 hover:border-blue-500/30 text-left flex items-center justify-between transition cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-650">
-                      <Users className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">ইমরান হোসেন (এজেন্ট)</span>
-                      <span className="text-[9px] text-slate-500 font-sans">ID: IMRAN_AGENT • ব্যালেন্স ৳৩৫,০০০</span>
-                    </div>
-                  </div>
-                  <div className="p-1 px-2.5 rounded-lg bg-emerald-600 text-white shadow-2xs hover:bg-emerald-750 transition text-[9.5px] font-bold font-sans">
-                    কানেক্ট
-                  </div>
-                </button>
-              </div>
+                </div>
+                <div className="p-1.5 px-3.5 rounded-lg bg-blue-600 text-white shadow-2xs hover:bg-blue-750 transition text-[10.5px] font-bold font-sans">
+                  কানেক্ট
+                </div>
+              </button>
             </div>
 
             <div className="text-center text-[9px] text-slate-400 font-medium">
